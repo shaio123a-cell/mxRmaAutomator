@@ -1,18 +1,14 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
-import path from "path";
-import { componentTagger } from "lovable-tagger";
+// FBCSKM-Manager/vite.config.ts
 
-// https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
-  server: {
-    host: "::",
-    port: 8080,
-  },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-}));
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  //  CRITICAL FIX: Set root to the project base to resolve '/src/main.tsx'
+  root: '.', 
+  base: './',
+  server: { port: 5173 },
+  // Ensure build output is correct for the root
+  build: { outDir: 'dist', emptyOutDir: true } 
+})

@@ -1,0 +1,29 @@
+{
+  "client": "web",
+  "scriptStructure": {
+    "delimiter": "*",
+    "fields": ["instanceName", "scriptPath", "args", "poll", "timeout", "", "regex"],
+    "terminator": "|"
+  },
+  "scriptUI": {
+    "allFields": [
+      {"name": "instanceName", "type": "text", "label": "Instance Name"},
+      {"name": "scriptPath", "type": "text", "label": "Script Path"},
+      {"name": "pollIntervalSec", "type": "number", "label": "Poll (sec)"},
+      {"name": "timeoutSec", "type": "number", "label": "Timeout (sec)"},
+      {"name": "regexField", "type": "text", "label": "Trailing regex field (Check output matches)"},
+      {"name": "args", "type": "textarea", "label": "Arguments"},
+      {"name": "method", "type": "select", "label": "Method", "options": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]},
+      {"name": "outputFormat", "type": "select", "label": "Output Format", "options": ["json", "xml", "text"]},
+      {"name": "url", "type": "text", "label": "URL"},
+      {"name": "payload", "type": "text", "label": "Payload (POST only)"},
+      {"name": "headers", "type": "text", "label": "Headers"},
+      {"name": "matchRegex", "type": "text", "label": "Regex Match"},
+      {"name": "username", "type": "text", "label": "Username"},
+      {"name": "password", "type": "password", "label": "Password"},
+      {"name": "decryptPass", "type": "select", "label": "Decrypt Pass", "options": ["TRUE", "FALSE"]}    
+    ],
+    "restmonOrder": ["instanceName", "scriptPath", "method", "outputFormat", "url", "payload", "headers", "matchRegex", "username", "password", "decryptPass", "pollIntervalSec", "timeoutSec", "regexField"],
+    "genericOrder": ["instanceName", "scriptPath", "args", "pollIntervalSec", "timeoutSec", "regexField"]
+  }
+}
