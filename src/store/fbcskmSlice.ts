@@ -28,6 +28,7 @@ export interface ScriptInstance {
   regexField?: string
   isRestmon?: boolean
   dirty?: boolean
+  [key: string]: any
 }
 
 export interface Device {
@@ -54,6 +55,7 @@ export interface DefaultScriptSettings {
   matrixKBPath: string
   genericPath: string
   isRestmonDefault: boolean
+  maxBackups?: number
 }
 
 export interface FBCSKMState {
@@ -64,9 +66,9 @@ export interface FBCSKMState {
   defaultScriptSettings?: DefaultScriptSettings
 }
 
-const initialState: FBCSKMState = { 
-  devices: [], 
-  originalLines: [], 
+const initialState: FBCSKMState = {
+  devices: [],
+  originalLines: [],
   dirty: false,
   defaultDeviceSettings: {
     port: 5985,
@@ -81,9 +83,10 @@ const initialState: FBCSKMState = {
   defaultScriptSettings: {
     matrixKBPath: 'c:/MatrixKB/Scripts/Restmon',
     genericPath: 'c:/MatrixKB/Scripts',
-    isRestmonDefault: true
+    isRestmonDefault: true,
+    maxBackups: 10
   }
- }
+}
 
 /**
  * Normalize smart quotes and parse CLI-like args to structured RestMonArgs.
@@ -190,14 +193,19 @@ function parseLine(line: string) {
 
     let instanceName = '', scriptPath = '', argstrRaw = '', poll: number | undefined, tout: number | undefined, regex: string | undefined
 
+    const extra: any = {}
+
     config.scriptStructure.fields.forEach((field, i) => {
+      if (!field.trim()) return
       const value = parts[i] || ''
+
       if (field === 'instanceName') instanceName = value
       else if (field === 'scriptPath') scriptPath = value
       else if (field === 'args') argstrRaw = value
       else if (field === 'poll') poll = value ? Number(value) : undefined
       else if (field === 'timeout') tout = value ? Number(value) : undefined
       else if (field === 'regex') regex = value || undefined
+      else extra[field] = value
     })
 
     // Decode protocol placeholders back to raw characters
@@ -216,7 +224,8 @@ function parseLine(line: string) {
       pollIntervalSec: poll,
       timeoutSec: tout,
       regexField: regex,
-      isRestmon
+      isRestmon,
+      ...extra
     })
   }
 
@@ -269,11 +278,19 @@ function serializeDevice(dev: Device): string {
     // Encode reserved separators in args payload
     cmd = cmd.replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>')
 
-    const poll = s.pollIntervalSec ?? ''
-    const tout = s.timeoutSec ?? ''
-    const reg = s.regexField ?? ''
+    const values = config.scriptStructure.fields.map(field => {
+      if (field === '') return ''
+      if (field === 'instanceName') return s.instanceName ?? ''
+      if (field === 'scriptPath') return s.scriptPath ?? ''
+      if (field === 'poll') return s.pollIntervalSec ?? ''
+      if (field === 'timeout') return s.timeoutSec ?? ''
+      if (field === 'regex') return s.regexField ?? ''
+      if (field === 'args') return cmd
+      // dynamic fields
+      return (s as any)[field] ?? ''
+    })
 
-    return `${s.instanceName}*${s.scriptPath}*${cmd}*${poll}*${tout}*${reg}|`
+    return values.join(config.scriptStructure.delimiter) + '|'
   })
 
   return [devSeg, ...scripts].join('|')
@@ -318,8 +335,8 @@ const slice = createSlice({
     },
     updateDevice(state, action: PayloadAction<Device>) {
       const i = state.devices.findIndex(d => d.id === action.payload.id)
-      if (i >= 0) { 
-        state.devices[i] = { ...action.payload, dirty: true }; 
+      if (i >= 0) {
+        state.devices[i] = { ...action.payload, dirty: true };
         state.devices[i].scripts.forEach(s => s.dirty = false)
         // if disabled, update originalLine
         if (state.devices[i].disabled) {
@@ -336,29 +353,8 @@ const slice = createSlice({
             dev.privateKeyPath ?? '',
             dev.passphrase ?? ''
           ].join(',')
-          const scripts = (dev.scripts ?? []).map(s => {
-            const parts: string[] = []
-            const a = s.args || {}
-            if (a.url) parts.push(`-url ${singleQuote(a.url)}`)
-            if (a.method) parts.push(`-method ${a.method}`)
-            if (a.outputFormat) parts.push(`-outputFormat ${a.outputFormat}`)
-            if (a.payload) parts.push(`-payload ${singleQuote(a.payload)}`)
-            if (a.searchKey) parts.push(`-searchKey ${singleQuote(a.searchKey)}`)
-            if (a.searchString) parts.push(`-searchString ${singleQuote(a.searchString)}`)
-            if (a.matchRegex) parts.push(`-matchRegex ${singleQuote(a.matchRegex)}`)
-            if (a.username) parts.push(`-username ${singleQuote(a.username)}`)
-            if (a.password) parts.push(`-password ${singleQuote(a.password)}`)
-            if (a.decryptPass) parts.push(`-decryptPass ${a.decryptPass}`)
-            if (a.encryptPass) parts.push(`-encryptPass ${a.encryptPass}`)
-            if (a.headers) parts.push(`-headers ${singleQuote(a.headers)}`)
-            let cmd = ` ${parts.join(' ')} `
-            cmd = cmd.replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>')
-            const poll = s.pollIntervalSec ?? ''
-            const tout = s.timeoutSec ?? ''
-            const reg = s.regexField ?? ''
-            return `${s.instanceName}*${s.scriptPath}*${cmd}*${poll}*${tout}*${reg}|`
-          })
-          const serialized = [devSeg, ...scripts].join('|')
+          // Use the shared serializeDevice function which is now dynamic
+          const serialized = serializeDevice(dev)
           state.devices[i].originalLine = '# ' + serialized
         }
       }
@@ -414,8 +410,8 @@ const slice = createSlice({
       d.scripts = d.scripts.filter(s => s.id !== action.payload.scriptId)
       state.dirty = true
     },
-    setDirty(state, action: PayloadAction<boolean>) { 
-      state.dirty = action.payload 
+    setDirty(state, action: PayloadAction<boolean>) {
+      state.dirty = action.payload
       if (!action.payload) {
         state.devices.forEach(d => { d.dirty = false; d.scripts.forEach(s => s.dirty = false) })
       }

@@ -78,7 +78,7 @@ export const fileApi = {
     return content;
   },
 
-  writeFile: async (fileName: string, content: string): Promise<boolean> => {
+  writeFile: async (fileName: string, content: string, options?: { maxBackups?: number }): Promise<boolean> => {
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -107,6 +107,43 @@ export const fileApi = {
     }
     return true;
   },
+  runCommand: async (command: string): Promise<{ stdout: string; stderr: string; error?: string }> => {
+    return { stdout: '', stderr: 'Dry run not available in web mode', error: 'Not available' };
+  },
+  openInElectron: async (): Promise<void> => {
+    // Attempt to open the custom protocol link
+    window.location.href = 'mxrma://open';
+  },
+  openExternal: async (url: string): Promise<void> => {
+    window.open(url, '_blank');
+  },
+  isElectron: false,
+  selectPath: async (options?: { directory?: boolean, file?: boolean, filters?: any[] }): Promise<string | null> => {
+    // Basic web fallback - standard file input doesn't support folder selection easily across browsers
+    // asking for 'directory' in web is not standard
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      if (options?.directory) {
+        // webkitdirectory is non-standard but works in Chrome/FF
+        input.setAttribute('webkitdirectory', '');
+        input.setAttribute('directory', '');
+      }
+      input.onchange = (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) {
+          resolve(null);
+          return;
+        }
+        // In web, we can't get full system path due to security, so we might just return name
+        // checking if user wants path or content. For settings, they want path.
+        // Web security usually blocks full path. Return mock or warning.
+        alert('Browser security prevents capturing full local paths. This feature works best in Electron.');
+        resolve(file.name); // best effort
+      };
+      input.click();
+    });
+  }
 };
 
 declare global {
@@ -115,4 +152,6 @@ declare global {
   }
 }
 
-window.electronAPI = fileApi;
+if (!window.electronAPI) {
+  window.electronAPI = fileApi;
+}

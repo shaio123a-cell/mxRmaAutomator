@@ -57,6 +57,7 @@ function serializeScript(s: any): string {
     else if (field === 'poll') value = s.pollIntervalSec ?? ''
     else if (field === 'timeout') value = s.timeoutSec ?? ''
     else if (field === 'regex') value = s.regexField ?? ''
+    else value = (s as any)[field] ?? ''
     return value
   })
   return values.join(config.scriptStructure.delimiter)

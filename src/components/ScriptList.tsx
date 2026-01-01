@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react'
 import { Button, Box, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
@@ -34,14 +35,15 @@ function SortableScriptItem({ s, idx, isSelected, onSelect, onSelectScript, dev,
       <ListItemButton
         selected={isSelected}
         onClick={() => { if (onSelectScript) onSelectScript(s.id, dev.id); else onSelect(s.id) }}
-        sx={{ py: 0.5, color: isSelected ? '#fff' : undefined, flex: 1 }}
+        sx={{ py: 0.25, color: isSelected ? '#fff' : undefined, flex: 1 }}
       >
         <ListItemText primary={
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            {s.dirty && <EditIcon sx={{ mr: 1, fontSize: 16, color: '#4a148c' }} />}
+            {s.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: '#4a148c' }} />}
             {s.instanceName}
           </Box>
-        } secondary={`${s.args.method || 'GET'} ${s.args.outputFormat || 'json'}`} sx={{ '& .MuiListItemText-primary': { color: isSelected ? '#fff' : 'inherit' }, '& .MuiListItemText-secondary': { color: isSelected ? '#fff' : 'inherit' } }} />
+        } secondary={`${s.args.method || 'GET'} ${s.args.outputFormat || 'json'}`}
+          sx={{ my: 0, '& .MuiListItemText-primary': { color: isSelected ? '#fff' : 'inherit' }, '& .MuiListItemText-secondary': { color: isSelected ? '#fff' : 'inherit' } }} />
       </ListItemButton>
     </ListItem>
   )
@@ -53,9 +55,14 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   const q = (searchText || '').trim().toLowerCase()
   // When searching inside scripts, only show scripts that match for the selected device
   const shownScripts = dev ? ((q && searchInScripts) ? dev.scripts.filter(s => {
-    if ((s.instanceName || '').toLowerCase().includes(q)) return true
-    if ((s.scriptPath || '').toLowerCase().includes(q)) return true
-    if (JSON.stringify(s.args || {}).toLowerCase().includes(q)) return true
+    // Helper to extract all values recursively
+    const getAllValues = (obj: any): string => {
+      if (obj === null || obj === undefined) return ''
+      if (typeof obj !== 'object') return String(obj)
+      return Object.values(obj).map(getAllValues).join(' ')
+    }
+    // Search only within values, ignoring keys
+    if (getAllValues(s).toLowerCase().includes(q)) return true
     return false
   }) : dev.scripts) : []
   const scriptDefaults = useAppSelector(s => (s.fbcskm as any).defaultScriptSettings || {})
@@ -88,7 +95,7 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuScriptId, setMenuScriptId] = useState<string | null>(null)
   const [dryRunOpen, setDryRunOpen] = useState(false)
-  const [dryRunResults, setDryRunResults] = useState<{ command: string, results: string } | null>(null)
+  const [dryRunResults, setDryRunResults] = useState<{ command: string, originalCommand: string, results: string } | null>(null)
 
   const openMenu = (e: React.MouseEvent<HTMLElement>, id: string) => { e.stopPropagation(); setMenuAnchor(e.currentTarget); setMenuScriptId(id) }
   const closeMenu = () => { setMenuAnchor(null); setMenuScriptId(null) }
@@ -96,7 +103,21 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   const dryRun = async (scriptId: string) => {
     const s = dev?.scripts.find(x => x.id === scriptId)
     if (!s) return
-    const cmd = s.scriptPath + (s.isRestmon ? (' ' + encodedPreviewForScript(s)) : (' ' + (s.args || '')))
+
+    const isPs1 = s.scriptPath.toLowerCase().endsWith('.ps1')
+    const pathQuoted = `"${s.scriptPath}"`
+
+    // Use encodedPreview (which now uses single quotes)
+    const argsBase = (s.isRestmon ? (' ' + encodedPreviewForScript(s)) : (' ' + (s.args || '')))
+
+    // Revert placeholders
+    const argsFinal = argsBase.replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*')
+
+    const originalCmd = `${pathQuoted}${argsFinal}`
+    const cmd = isPs1
+      ? `powershell.exe -ExecutionPolicy Bypass -File ${pathQuoted}${argsFinal}`
+      : `${pathQuoted}${argsFinal}`
+
     let results = '(placeholder - command not executed)'
     if (window.electronAPI?.runCommand) {
       try {
@@ -106,24 +127,27 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
         results = `Failed to run: ${e}`
       }
     }
-    setDryRunResults({ command: cmd, results })
+    setDryRunResults({ command: cmd, originalCommand: originalCmd, results })
     setDryRunOpen(true)
   }
 
   const encodedPreviewForScript = (s: any) => {
+    // Use single quotes for wrapping, escape single quotes as '' (PowerShell standard)
+    const escapeArg = (str: string) => str.replace(/'/g, "''")
     if (!s.isRestmon) return s.args || ''
     const parts: string[] = []
     const a = s.args || {}
-    if (a.url) parts.push(`-url '${a.url}'`)
+    if (a.url) parts.push(`-url '${escapeArg(a.url)}'`)
     if (a.method) parts.push(`-method ${a.method}`)
     if (a.outputFormat) parts.push(`-outputFormat ${a.outputFormat}`)
-    if (a.payload) parts.push(`-payload '${a.payload}'`)
-    if (a.searchKey) parts.push(`-searchKey '${a.searchKey}'`)
-    if (a.searchString) parts.push(`-searchString '${a.searchString}'`)
-    if (a.matchRegex) parts.push(`-matchRegex '${a.matchRegex}'`)
-    if (a.username) parts.push(`-username '${a.username}'`)
-    if (a.password) parts.push(`-password '${a.password}'`)
-    if (a.headers) parts.push(`-headers '${a.headers}'`)
+    if (a.payload) parts.push(`-payload '${escapeArg(a.payload)}'`)
+    if (a.searchKey) parts.push(`-searchKey '${escapeArg(a.searchKey)}'`)
+    if (a.searchString) parts.push(`-searchString '${escapeArg(a.searchString)}'`)
+    if (a.matchRegex) parts.push(`-matchRegex '${escapeArg(a.matchRegex)}'`)
+    if (a.username) parts.push(`-username '${escapeArg(a.username)}'`)
+    if (a.password) parts.push(`-password '${escapeArg(a.password)}'`)
+    // headers: passed raw
+    if (a.headers) parts.push(`-headers ${a.headers}`)
     if (a.decryptPass) parts.push(`-decryptPass ${a.decryptPass}`)
     let cmd = parts.join(' ')
     cmd = cmd.replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>')
@@ -203,6 +227,12 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
       <Stack direction='row' spacing={1}>
         <TextField label='Instance name' value={instanceName} onChange={e => setInstanceName(e.target.value)} />
         <TextField label='Script path' value={scriptPath} onChange={e => setScriptPath(e.target.value)} />
+        <IconButton onClick={async () => {
+          const path = await window.electronAPI.selectPath({ file: true, filters: [{ name: 'PowerShell Scripts', extensions: ['ps1'] }] });
+          if (path) setScriptPath(path);
+        }}>
+          <FolderOpenIcon />
+        </IconButton>
         <Button variant='contained' onClick={create}>Add</Button>
       </Stack>
 
@@ -210,7 +240,7 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
       <Box sx={{ maxHeight: 10 * 48, overflowY: 'auto' }}>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={shownScripts.map(s => s.id)} strategy={verticalListSortingStrategy}>
-            <List dense>
+            <List>
               {shownScripts.map((s, idx) => {
                 const isSelected = selectedId === s.id
                 return (
@@ -238,7 +268,16 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
           {dryRunResults && (
             <>
               <Box sx={{ position: 'relative', mb: 2 }}>
-                <Typography variant='h6'>Command</Typography>
+                <Typography variant='h6'>Original Command</Typography>
+                <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.originalCommand)}>
+                  <ContentCopyIcon />
+                </IconButton>
+                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4 }}>
+                  {dryRunResults.originalCommand}
+                </pre>
+              </Box>
+              <Box sx={{ position: 'relative', mb: 2 }}>
+                <Typography variant='h6'>Executed Command</Typography>
                 <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.command)}>
                   <ContentCopyIcon />
                 </IconButton>
@@ -251,13 +290,16 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
                 <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.results)}>
                   <ContentCopyIcon />
                 </IconButton>
-                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4 }}>
-                  {dryRunResults.results.split('\n').map((line, i) => {
-                    if (line.toLowerCase().includes('error')) return <span key={i} style={{ color: 'red' }}>{line}\n</span>
-                    if (line.toLowerCase().includes('warn')) return <span key={i} style={{ color: 'orange' }}>{line}\n</span>
-                    return <span key={i}>{line}\n</span>
-                  })}
-                </pre>
+                <Box sx={{ fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>
+                  {dryRunResults.results.split(/\r?\n/).map((line, i) => (
+                    <div key={i} style={{
+                      color: line.toLowerCase().includes('error') ? 'red' : line.toLowerCase().includes('warn') ? 'orange' : 'inherit',
+                      minHeight: '1.2em'
+                    }}>
+                      {line}
+                    </div>
+                  ))}
+                </Box>
               </Box>
             </>
           )}
