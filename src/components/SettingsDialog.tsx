@@ -143,7 +143,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean, onClo
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField label='MatrixKB RestMon Script Path' value={matrixPath} onChange={e => setMatrixPath(e.target.value)} size='small' fullWidth />
               <IconButton onClick={async () => {
-                const path = await window.electronAPI.selectPath({ file: true, filters: [{ name: 'PowerShell Scripts', extensions: ['ps1'] }] });
+                const path = await window.electronAPI.selectPath({ file: true });
                 if (path) setMatrixPath(path);
               }} title="Browse File">
                 <InsertDriveFileIcon />
@@ -166,7 +166,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean, onClo
               >
                 <MenuItem onClick={async () => {
                   closeMenu();
-                  const path = await window.electronAPI.selectPath({ file: true, filters: [{ name: 'PowerShell Scripts', extensions: ['ps1'] }] });
+                  const path = await window.electronAPI.selectPath({ file: true });
                   if (path) setGenericPath(path);
                 }}>
                   <InsertDriveFileIcon sx={{ mr: 1 }} /> Select File

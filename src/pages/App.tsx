@@ -25,7 +25,9 @@ declare global {
 
 import ErrorBoundary from '../components/ErrorBoundary'
 import SettingsDialog from '../components/SettingsDialog'
+import HelpDialog from '../components/HelpDialog'
 import SettingsIcon from '@mui/icons-material/Settings'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 
 // Logos
 import BMCHelixLogo from '../../logo/BMCHelix Logo Medium Transparent.png'
@@ -48,6 +50,7 @@ export default function App() {
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null)
   const [deviceFormOpen, setDeviceFormOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [showDisabled, setShowDisabled] = useState(false)
 
   // Unsaved changes dialog state
@@ -293,6 +296,7 @@ export default function App() {
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
             <Typography variant='h4'>PATROL Scripting KM File Based Configuraiton Editor</Typography>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+              <IconButton size='small' aria-label='help' onClick={() => setHelpOpen(true)}><HelpOutlineIcon /></IconButton>
               <IconButton size='small' aria-label='settings' onClick={() => setSettingsOpen(true)}><SettingsIcon /></IconButton>
               {window.electronAPI?.isElectron ? (
                 <Button size='small' variant='outlined' onClick={() => window.electronAPI.openExternal?.('http://localhost:5173')}>Open in Browser</Button>
@@ -397,6 +401,7 @@ export default function App() {
         </Dialog>
 
         <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
         {/* Load unsaved changes confirmation dialog for file open */}
         <Dialog open={loadUnsavedOpen} onClose={() => setLoadUnsavedOpen(false)}>
           <DialogTitle>Unsaved changes</DialogTitle>

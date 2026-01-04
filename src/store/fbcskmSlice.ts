@@ -261,7 +261,7 @@ function serializeDevice(dev: Device): string {
     const parts: string[] = []
     const a = s.args || {}
 
-    if (a.url) parts.push(`-url ${singleQuote(a.url)}`)
+    if (a.url) parts.push(`-url ${a.url}`)
     if (a.method) parts.push(`-method ${a.method}`)
     if (a.outputFormat) parts.push(`-outputFormat ${a.outputFormat}`)
     if (a.payload) parts.push(`-payload ${singleQuote(a.payload)}`)

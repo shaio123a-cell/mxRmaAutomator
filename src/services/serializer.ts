@@ -27,7 +27,7 @@ function structToArgString(args: any): string {
 
   const parts: string[] = []
 
-  if (args.url) parts.push(`-url ${singleQuote(args.url)}`)
+  if (args.url) parts.push(`-url ${args.url}`)
   if (args.method) parts.push(`-method ${args.method}`)
   if (args.outputFormat) parts.push(`-outputFormat ${args.outputFormat}`)
   if (args.payload) parts.push(`-payload ${singleQuote(args.payload)}`)

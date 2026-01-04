@@ -94,7 +94,7 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
       if (typeof draft.args !== 'object' || !draft.args) return ' '
       const parts: string[] = []
       const a = draft.args
-      if (a.url) parts.push(`-url '${escapeArg(a.url)}'`)
+      if (a.url) parts.push(`-url ${a.url}`)
       if (a.method) parts.push(`-method ${a.method}`)
       if (a.outputFormat) parts.push(`-outputFormat ${a.outputFormat}`)
       if (a.payload) parts.push(`-payload '${escapeArg(a.payload)}'`)
@@ -296,7 +296,7 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
                       onChange={e => set(field.name, e.target.value)}
                     />
                     <IconButton onClick={async () => {
-                      const path = await window.electronAPI.selectPath({ file: true, filters: [{ name: 'PowerShell Scripts', extensions: ['ps1'] }] });
+                      const path = await window.electronAPI.selectPath({ file: true });
                       if (path) set(field.name, path);
                     }}>
                       <FolderOpenIcon />
@@ -336,7 +336,7 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
 
             const originalCmd = `${pathQuoted}${argsBase}`
             const cmd = isPs1
-              ? `powershell.exe -ExecutionPolicy Bypass -File ${pathQuoted}${argsBase}`
+              ? `powershell.exe -ExecutionPolicy Bypass -Command "& '${draft.scriptPath}' ${argsBase.replace(/"/g, '\\"')}"`
               : `${pathQuoted}${argsBase}`
 
             let results = ''
