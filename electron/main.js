@@ -63,7 +63,6 @@ ipcMain.handle('open-external', async (event, url) => {
 });
 
 // Start the app
-app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

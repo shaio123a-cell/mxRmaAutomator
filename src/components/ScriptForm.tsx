@@ -6,6 +6,8 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import { Device, ScriptInstance, updateScript } from '../store/fbcskmSlice'
 import { useAppDispatch } from '../store/store'
 import config from '../config'
+import { TimePicker } from '@mui/x-date-pickers'
+import dayjs from 'dayjs'
 
 export type ScriptFormHandle = {
   isDirty: () => boolean
@@ -70,17 +72,22 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
     const set = (fieldName: string, value: any) => {
       const field = config.scriptUI.allFields.find(f => f.name === fieldName)
       const isNumber = field?.type === 'number'
+      const isCheckbox = field?.type === 'checkbox'
       const restmonSpecific = ['method', 'outputFormat', 'url', 'payload', 'headers', 'matchRegex', 'username', 'password', 'decryptPass']
       setDraft(prev => {
         const next = { ...prev }
+        let finalValue = value
+        if (isNumber) finalValue = Number(value)
+        if (isCheckbox) finalValue = value ? '1' : '0'
+
         if (draft.isRestmon && restmonSpecific.includes(fieldName)) {
           if (typeof next.args !== 'object' || !next.args) next.args = {}
           next.args = { ...next.args }
-            ; (next.args as any)[fieldName] = isNumber ? Number(value) : value
+            ; (next.args as any)[fieldName] = finalValue
         } else if (fieldName === 'args') {
           next.args = value
         } else {
-          ; (next as any)[fieldName] = isNumber ? Number(value) : value
+          ; (next as any)[fieldName] = finalValue
         }
         return next
       })
@@ -115,18 +122,23 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
     const fieldsToShow = fieldOrder.map(name => config.scriptUI.allFields.find(f => f.name === name)).filter(Boolean) as FieldConfig[]
 
     const getValue = (fieldName: string) => {
+      const field = config.scriptUI.allFields.find(f => f.name === fieldName)
+      const isCheckbox = field?.type === 'checkbox'
       const restmonSpecific = ['method', 'outputFormat', 'url', 'payload', 'headers', 'matchRegex', 'username', 'password', 'decryptPass']
+
+      let val: any = ''
       if (draft.isRestmon && restmonSpecific.includes(fieldName)) {
         if (typeof draft.args === 'object' && draft.args) {
-          return (draft.args as any)[fieldName] || ''
-        } else {
-          return ''
+          val = (draft.args as any)[fieldName] || ''
         }
       } else if (fieldName === 'args') {
-        return draft.args || ''
+        val = draft.args || ''
       } else {
-        return (draft as any)[fieldName] || ''
+        val = (draft as any)[fieldName] || ''
       }
+
+      if (isCheckbox) return val === '1' || val === 1 || val === true
+      return val
     }
 
     const save = () => {
@@ -281,9 +293,37 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
               )
             }
 
+            const isSchedulingField = field.name.startsWith('scriptSunday') ||
+              field.name.startsWith('scriptMonday') ||
+              field.name.startsWith('scriptTueday') ||
+              field.name.startsWith('scriptWednesday') ||
+              field.name.startsWith('scriptThursday') ||
+              field.name.startsWith('scriptFriday') ||
+              field.name.startsWith('scriptSaturday') ||
+              field.name === 'scriptStartTime' ||
+              field.name === 'scriptEndTime';
+
+            if (isSchedulingField) return null;
+
+            if (field.type === 'checkbox') {
+              return (
+                <Grid item xs={12} md={4} key={field.name}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={!!value}
+                        onChange={e => set(field.name, e.target.checked)}
+                      />
+                    }
+                    label={field.label}
+                  />
+                </Grid>
+              )
+            }
+
             return (
               <Grid item xs={12} md={
-                field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' ? 12 :
+                field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 :
                   field.name === 'pollIntervalSec' || field.name === 'timeoutSec' ? 3 :
                     6
               } key={field.name}>
@@ -305,13 +345,14 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
                 ) : (
                   <TextField
                     label={field.label}
-                    type={isPassword ? 'password' : isNumber ? 'number' : 'text'}
+                    type={isPassword ? 'password' : isNumber ? 'number' : field.type === 'time' ? 'time' : 'text'}
                     select={isSelect}
                     multiline={isTextarea}
                     minRows={isTextarea ? 3 : undefined}
                     fullWidth
                     value={value}
                     onChange={e => set(field.name, e.target.value)}
+                    InputLabelProps={field.type === 'time' ? { shrink: true } : undefined}
                   >
                     {isSelect && field.options?.map(option => (
                       <MenuItem key={option} value={option}>{option}</MenuItem>
@@ -321,6 +362,58 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
               </Grid>
             )
           })}
+
+          <Grid item xs={12}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <Box sx={{ border: '1px solid #ccc', borderRadius: 1, p: 2, height: '100%' }}>
+                  <Typography variant="subtitle2" gutterBottom>Run Days</Typography>
+                  <Stack>
+                    {['scriptSunday', 'scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday'].map(dayName => {
+                      const f = config.scriptUI.allFields.find(field => field.name === dayName);
+                      if (!f) return null;
+                      return (
+                        <FormControlLabel
+                          key={dayName}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={!!getValue(dayName)}
+                              onChange={e => set(dayName, e.target.checked)}
+                            />
+                          }
+                          label={f.label}
+                          sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                        />
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Box sx={{ border: '1px solid #ccc', borderRadius: 1, p: 2, height: '100%' }}>
+                  <Typography variant="subtitle2" gutterBottom>Operating Window</Typography>
+                  <Stack spacing={2} sx={{ mt: 1 }}>
+                    <TimePicker
+                      label="Start Time"
+                      ampm={false}
+                      value={getValue('scriptStartTime') ? dayjs(getValue('scriptStartTime'), 'HH:mm') : null}
+                      onChange={(newValue) => set('scriptStartTime', newValue ? newValue.format('HH:mm') : '')}
+                      slotProps={{ textField: { fullWidth: true } }}
+                    />
+                    <TimePicker
+                      label="End Time"
+                      ampm={false}
+                      value={getValue('scriptEndTime') ? dayjs(getValue('scriptEndTime'), 'HH:mm') : null}
+                      onChange={(newValue) => set('scriptEndTime', newValue ? newValue.format('HH:mm') : '')}
+                      slotProps={{ textField: { fullWidth: true } }}
+                    />
+                  </Stack>
+                </Box>
+              </Grid>
+            </Grid>
+          </Grid>
+
           <Grid item xs={12}>
             <TextField label={draft.isRestmon ? 'Encoded Command Preview' : 'Arguments Preview'} fullWidth multiline minRows={2} value={encodedPreview} InputProps={{ readOnly: true }} />
           </Grid>

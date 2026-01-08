@@ -31,11 +31,26 @@ export default forwardRef<DeviceFormHandle, Props>(function DeviceForm({ open, d
   // Local draft
   const [draft, setDraft] = useState<Device | null>(device ?? null)
 
-  // Reset draft (and original snapshot) only when switching devices by id
+  // Reset draft (and original snapshot) when the device prop changes.
+  // We use device?.id as a trigger for a full "reset", but we also want to 
+  // ensure that the scripts (which aren't edited here) stay in sync if updated elsewhere.
   useEffect(() => {
-    originalRef.current = device ?? null
-    setDraft(device ?? null)
-  }, [device?.id])
+    if (device) {
+      if (!originalRef.current || originalRef.current.id !== device.id) {
+        // Full reset for a new device selection
+        originalRef.current = device
+        setDraft(device)
+      } else {
+        // Just sync scripts and other background fields if the ID is the same
+        // but the object reference changed (e.g. scripts added via paste)
+        setDraft(prev => prev ? { ...prev, scripts: device.scripts } : null)
+        originalRef.current = { ...originalRef.current, scripts: device.scripts }
+      }
+    } else {
+      originalRef.current = null
+      setDraft(null)
+    }
+  }, [device])
 
   const set = <K extends keyof Device>(key: K, value: Device[K]) => {
     if (!draft) return
@@ -69,10 +84,15 @@ export default forwardRef<DeviceFormHandle, Props>(function DeviceForm({ open, d
   }
 
   const saveInternal = (closeAfter: boolean = true): boolean => {
-    if (!validate(draft)) return false
+    // VITAL: Merge the latest scripts from the REDUX state (the prop)
+    // because this form does not edit scripts, and the draft might be stale.
+    const toSave = {
+      ...draft!,
+      scripts: device?.scripts || []
+    }
 
     // Build a clean, immutable payload
-    const payload = buildPayload(draft!)
+    const payload = buildPayload(toSave)
 
     // Update local draft to match what we send
     setDraft(payload)

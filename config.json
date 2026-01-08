@@ -2,28 +2,231 @@
   "client": "web",
   "scriptStructure": {
     "delimiter": "*",
-    "fields": ["instanceName", "scriptPath", "args", "poll", "timeout", "", "regex"],
+    "fields": [
+      "instanceName",
+      "scriptPath",
+      "args",
+      "poll",
+      "timeout",
+      "regex",
+      "ScriptIndependentMonitorView",
+      "scriptSchedulingEnable",
+      "scriptScheduleDateRegex",
+      "scriptMonday",
+      "scriptTueday",
+      "scriptWednesday",
+      "scriptThursday",
+      "scriptFriday",
+      "scriptSaturday",
+      "scriptSunday",
+      "scriptStartTime",
+      "scriptEndTime"
+    ],
     "terminator": "|"
   },
   "scriptUI": {
     "allFields": [
-      {"name": "instanceName", "type": "text", "label": "Instance Name"},
-      {"name": "scriptPath", "type": "text", "label": "Script Path"},
-      {"name": "pollIntervalSec", "type": "number", "label": "Poll (sec)"},
-      {"name": "timeoutSec", "type": "number", "label": "Timeout (sec)"},
-      {"name": "regexField", "type": "text", "label": "Trailing regex field (Check output matches)"},
-      {"name": "args", "type": "textarea", "label": "Arguments"},
-      {"name": "method", "type": "select", "label": "Method", "options": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]},
-      {"name": "outputFormat", "type": "select", "label": "Output Format", "options": ["json", "xml", "text"]},
-      {"name": "url", "type": "text", "label": "URL"},
-      {"name": "payload", "type": "text", "label": "Payload (POST only)"},
-      {"name": "headers", "type": "text", "label": "Headers"},
-      {"name": "matchRegex", "type": "text", "label": "Regex Match"},
-      {"name": "username", "type": "text", "label": "Username"},
-      {"name": "password", "type": "password", "label": "Password"},
-      {"name": "decryptPass", "type": "select", "label": "Decrypt Pass", "options": ["TRUE", "FALSE"]}    
+      {
+        "name": "instanceName",
+        "type": "text",
+        "label": "Instance Name"
+      },
+      {
+        "name": "scriptPath",
+        "type": "text",
+        "label": "Script Path"
+      },
+      {
+        "name": "pollIntervalSec",
+        "type": "number",
+        "label": "Poll (sec)"
+      },
+      {
+        "name": "timeoutSec",
+        "type": "number",
+        "label": "Timeout (sec)"
+      },
+      {
+        "name": "regexField",
+        "type": "text",
+        "label": "Trailing regex field (Check output matches)"
+      },
+      {
+        "name": "args",
+        "type": "textarea",
+        "label": "Arguments"
+      },
+      {
+        "name": "method",
+        "type": "select",
+        "label": "Method",
+        "options": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE",
+          "HEAD",
+          "OPTIONS"
+        ]
+      },
+      {
+        "name": "outputFormat",
+        "type": "select",
+        "label": "Output Format",
+        "options": [
+          "json",
+          "xml",
+          "text"
+        ]
+      },
+      {
+        "name": "url",
+        "type": "text",
+        "label": "URL"
+      },
+      {
+        "name": "payload",
+        "type": "text",
+        "label": "Payload (POST only)"
+      },
+      {
+        "name": "headers",
+        "type": "text",
+        "label": "Headers"
+      },
+      {
+        "name": "matchRegex",
+        "type": "text",
+        "label": "Regex Match"
+      },
+      {
+        "name": "username",
+        "type": "text",
+        "label": "Username"
+      },
+      {
+        "name": "password",
+        "type": "password",
+        "label": "Password"
+      },
+      {
+        "name": "decryptPass",
+        "type": "select",
+        "label": "Decrypt Pass",
+        "options": [
+          "TRUE",
+          "FALSE"
+        ]
+      },
+      {
+        "name": "ScriptIndependentMonitorView",
+        "type": "checkbox",
+        "label": "Independent Monitor View"
+      },
+      {
+        "name": "scriptSchedulingEnable",
+        "type": "checkbox",
+        "label": "Enable Scheduling"
+      },
+      {
+        "name": "scriptScheduleDateRegex",
+        "type": "text",
+        "label": "Schedule Date Regex"
+      },
+      {
+        "name": "scriptMonday",
+        "type": "checkbox",
+        "label": "Monday"
+      },
+      {
+        "name": "scriptTueday",
+        "type": "checkbox",
+        "label": "Tuesday"
+      },
+      {
+        "name": "scriptWednesday",
+        "type": "checkbox",
+        "label": "Wednesday"
+      },
+      {
+        "name": "scriptThursday",
+        "type": "checkbox",
+        "label": "Thursday"
+      },
+      {
+        "name": "scriptFriday",
+        "type": "checkbox",
+        "label": "Friday"
+      },
+      {
+        "name": "scriptSaturday",
+        "type": "checkbox",
+        "label": "Saturday"
+      },
+      {
+        "name": "scriptSunday",
+        "type": "checkbox",
+        "label": "Sunday"
+      },
+      {
+        "name": "scriptStartTime",
+        "type": "time",
+        "label": "Start Time"
+      },
+      {
+        "name": "scriptEndTime",
+        "type": "time",
+        "label": "End Time"
+      }
     ],
-    "restmonOrder": ["instanceName", "scriptPath", "method", "outputFormat", "url", "payload", "headers", "matchRegex", "username", "password", "decryptPass", "pollIntervalSec", "timeoutSec", "regexField"],
-    "genericOrder": ["instanceName", "scriptPath", "args", "pollIntervalSec", "timeoutSec", "regexField"]
+    "restmonOrder": [
+      "instanceName",
+      "scriptPath",
+      "method",
+      "outputFormat",
+      "url",
+      "payload",
+      "headers",
+      "matchRegex",
+      "username",
+      "password",
+      "decryptPass",
+      "pollIntervalSec",
+      "timeoutSec",
+      "regexField",
+      "ScriptIndependentMonitorView",
+      "scriptSchedulingEnable",
+      "scriptScheduleDateRegex",
+      "scriptSunday",
+      "scriptMonday",
+      "scriptTueday",
+      "scriptWednesday",
+      "scriptThursday",
+      "scriptFriday",
+      "scriptSaturday",
+      "scriptStartTime",
+      "scriptEndTime"
+    ],
+    "genericOrder": [
+      "instanceName",
+      "scriptPath",
+      "args",
+      "pollIntervalSec",
+      "timeoutSec",
+      "regexField",
+      "ScriptIndependentMonitorView",
+      "scriptSchedulingEnable",
+      "scriptScheduleDateRegex",
+      "scriptSunday",
+      "scriptMonday",
+      "scriptTueday",
+      "scriptWednesday",
+      "scriptThursday",
+      "scriptFriday",
+      "scriptSaturday",
+      "scriptStartTime",
+      "scriptEndTime"
+    ]
   }
 }
