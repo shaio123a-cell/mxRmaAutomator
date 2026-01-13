@@ -26,6 +26,9 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
 
     const [headersError, setHeadersError] = useState(false)
     const [payloadError, setPayloadError] = useState(false)
+    const [scriptNameError, setScriptNameError] = useState(false)
+
+    const validateScriptName = (value: string) => !/[!@#$%^&*|]/.test(value)
 
     const validateHeaders = (value: string) => !value || (value.trim().startsWith('@{') && value.trim().endsWith('}'))
 
@@ -62,6 +65,10 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
         setPayloadError(!validatePayload(draft.args.payload || '', draft.args.outputFormat || 'json'))
       }
     }, [draft.args.outputFormat, draft.args.payload])
+
+    useEffect(() => {
+      setScriptNameError(!validateScriptName(draft.instanceName || ''))
+    }, [draft.instanceName])
 
     useImperativeHandle(ref, () => ({
       isDirty: () => JSON.stringify(draft) !== JSON.stringify(script),
@@ -137,11 +144,20 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
         val = (draft as any)[fieldName] || ''
       }
 
+      // Decode BMC placeholders for regex fields when displaying
+      if (fieldName === 'scriptScheduleDateRegex' || fieldName === 'regexField') {
+        val = String(val).replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*')
+      }
+
       if (isCheckbox) return val === '1' || val === 1 || val === true
       return val
     }
 
     const save = () => {
+      if (scriptNameError || headersError || payloadError) {
+        alert('Please fix validation errors before saving')
+        return
+      }
       dispatch(updateScript({ deviceId: device.id, script: draft }))
       onChange(draft)
     }
@@ -304,6 +320,21 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
               field.name === 'scriptEndTime';
 
             if (isSchedulingField) return null;
+
+            if (field.name === 'instanceName') {
+              return (
+                <Grid item xs={12} md={6} key={field.name}>
+                  <TextField
+                    label={field.label}
+                    fullWidth
+                    value={value}
+                    onChange={e => { set(field.name, e.target.value); setScriptNameError(!validateScriptName(e.target.value)) }}
+                    error={scriptNameError}
+                    helperText={scriptNameError ? 'Script name must not contain these characters: !@#$%^&*|' : ''}
+                  />
+                </Grid>
+              )
+            }
 
             if (field.type === 'checkbox') {
               return (

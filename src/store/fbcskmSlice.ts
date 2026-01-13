@@ -204,7 +204,14 @@ function parseLine(line: string) {
       else if (field === 'args') argstrRaw = value
       else if (field === 'poll') poll = value ? Number(value) : undefined
       else if (field === 'timeout') tout = value ? Number(value) : undefined
-      else if (field === 'regex') regex = value || undefined
+      else if (field === 'regex') {
+        // Decode BMC placeholders for regex field
+        regex = value ? value.replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*') : undefined
+      }
+      else if (field === 'scriptScheduleDateRegex') {
+        // Decode BMC placeholders for scheduling regex
+        extra[field] = value ? value.replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*') : value
+      }
       else extra[field] = value
     })
 
@@ -284,9 +291,17 @@ function serializeDevice(dev: Device): string {
       if (field === 'scriptPath') return s.scriptPath ?? ''
       if (field === 'poll') return s.pollIntervalSec ?? ''
       if (field === 'timeout') return s.timeoutSec ?? ''
-      if (field === 'regex') return s.regexField ?? ''
+      if (field === 'regex') {
+        // Encode BMC placeholders for regex field
+        const regexVal = s.regexField ?? ''
+        return regexVal ? String(regexVal).replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>') : ''
+      }
       if (field === 'args') return cmd
-      // dynamic fields
+      // dynamic fields - encode scriptScheduleDateRegex
+      if (field === 'scriptScheduleDateRegex') {
+        const scheduleRegex = (s as any)[field] ?? ''
+        return scheduleRegex ? String(scheduleRegex).replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>') : ''
+      }
       return (s as any)[field] ?? ''
     })
 

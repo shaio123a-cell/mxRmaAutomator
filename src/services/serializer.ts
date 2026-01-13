@@ -56,7 +56,16 @@ function serializeScript(s: any): string {
     }
     else if (field === 'poll') value = s.pollIntervalSec ?? ''
     else if (field === 'timeout') value = s.timeoutSec ?? ''
-    else if (field === 'regex') value = s.regexField ?? ''
+    else if (field === 'regex') {
+      // Encode BMC placeholders for regex field
+      const regexVal = s.regexField ?? ''
+      value = regexVal ? encodeSpecials(String(regexVal)) : ''
+    }
+    else if (field === 'scriptScheduleDateRegex') {
+      // Encode BMC placeholders for scheduling regex
+      const scheduleRegex = (s as any)[field] ?? ''
+      value = scheduleRegex ? encodeSpecials(String(scheduleRegex)) : ''
+    }
     else value = (s as any)[field] ?? ''
     return value
   })
