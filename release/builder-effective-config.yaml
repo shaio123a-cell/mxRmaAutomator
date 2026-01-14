@@ -1,0 +1,26 @@
+directories:
+  output: release
+  buildResources: build
+appId: com.shaio.mxrestmonsupersonic
+productName: mxRestmonSuperSonic
+files:
+  - filter:
+      - dist/**/*
+      - electron/**/*
+      - config.json
+      - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+electronVersion: 39.2.7

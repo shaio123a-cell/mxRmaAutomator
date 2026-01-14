@@ -47,7 +47,7 @@ export default function HelpDialog({ open, onClose }: { open: boolean, onClose: 
                     </Tabs>
                 </Box>
                 <CustomTabPanel value={tabValue} index={0}>
-                    <Typography variant="h6" gutterBottom>How to use MatrixKB PATROL Scripting KM File Based Configuraiton Editor</Typography>
+                    <Typography variant="h6" gutterBottom>User Guide for matrixKB RestMon SuperSonic for PATROL Scripting KM File Based Configuraiton Editor</Typography>
                     <List>
                         <ListItem>
                             <ListItemText
@@ -88,7 +88,7 @@ export default function HelpDialog({ open, onClose }: { open: boolean, onClose: 
                 <CustomTabPanel value={tabValue} index={1}>
                     <Stack spacing={3} alignItems="center" sx={{ py: 4 }}>
                         <img src={MatrixKBLogo} alt="MatrixKB" style={{ maxWidth: 200 }} />
-                        <Typography variant="h5">FBCSKM Manager</Typography>
+                        <Typography variant="h5">matrixKB RestMon SuperSonic for PATROL Scripting KM</Typography>
                         <Typography variant="body1">Version {packageJson.version}</Typography>
                         <Typography variant="body2" color="text.secondary">
                             A comprehensive tool for managing File Based Configuration for BMC Helix / PATROL KM.
