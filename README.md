@@ -1,13 +1,16 @@
 
-# MatrixKB for Scripting KM  - (React & Electron) – v2.5
+# Matrix RestMon SuperSonic - Scripting Automator – v2.5
+A solution that transforms PATROL KM configuration management into a seamless visual experience. Instead of manually editing text files, administrators can visually manage complex hierarchies of devices and scripts—including generic and Restmon payloads. With built-in safeguards like script dry-runs, automatic character encoding, and a centralized administration center for managing backups and defaults, it dramatically reduces configuration errors and deployment time.
 
-- Visually Manage PATROL KM for Scripting config Files → Device → Scripts
-- Support Generic scripts and Restmon Scripts Management
-- Dryrun scripts to see the expected output
-- CRUD: Create/Delete Devices & Scripts; Update scripts via Wizard
-- Device Form (right-hand drawer) edits all device fields with defaults (Port=5985, Timeout=2000 ms, Poll=60 sec)
-- Administration - Control Cetral Config like - default script path, default script type, number of generation to maintain as copy (backup) etc
-- Command-only encoding: inside command `|`→`<BMC_SEP>`, `*`→`<BMC_STAR>`
+# Key Features 
+- Visual Config Manager: UI for mapping PATROL KM files across the Device → Scripts hierarchy.
+- Script Wizard & CRUD: Native support for managing and editing Generic and Restmon scripts.
+- Dry-run Validation: Embedded payload testing to view expected script output safely.
+- Quick-Edit Device Drawer: Slide-out form with predefined best-practice defaults (Port=5985, Timeout=2000ms, Poll=60s).
+- Admin Control Center: Global configuration management for script paths, types, and backup retention rules.
+- Safe Command Parsing: Embedded encoding engine translates | to <BMC_SEP> and * to <BMC_STAR>.
+- Copy and Paste Script Definitions and Entire device with all its script 
+- Drag & Drop Scripts and Devices to re-order them in the list 
 
 # User Interface 
     - Web Interface (React)
