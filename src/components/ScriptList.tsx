@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect } from 'react'
-import { Button, Box, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
+import { Button, Box, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, Tooltip } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import { addScript, deleteScript, reorderScripts } from '../store/fbcskmSlice'
@@ -23,6 +24,10 @@ function SortableScriptItem({ s, idx, isSelected, onSelect, onSelectScript, dev,
     opacity: isDragging ? 0.5 : 1,
   }
 
+  const errorMessage = (!s.disabled && Array.isArray(s.validationErrors) && s.validationErrors.length)
+    ? s.validationErrors.join('\n')
+    : ''
+
   return (
     <ListItem ref={setNodeRef} style={style} secondaryAction={
       <IconButton edge='end' onClick={(e) => openMenu(e, s.id)} aria-label='actions' size='small' sx={{ color: isSelected ? '#fff' : undefined }}>
@@ -39,6 +44,11 @@ function SortableScriptItem({ s, idx, isSelected, onSelect, onSelectScript, dev,
       >
         <ListItemText primary={
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {errorMessage && (
+              <Tooltip title={errorMessage} placement='top'>
+                <ErrorOutlineIcon sx={{ mr: 1, fontSize: 14, color: '#d32f2f' }} />
+              </Tooltip>
+            )}
             {s.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: '#4a148c' }} />}
             {s.instanceName}
           </Box>

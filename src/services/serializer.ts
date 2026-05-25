@@ -13,6 +13,12 @@ function singleQuote(value: string): string {
 /**
  * Replace reserved characters with protocol tokens.
  */
+const scheduleDayFields = ['scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday', 'scriptSunday']
+
+function normalizeScheduleDayValue(value: any): string {
+  return value === '1' || value === 1 || value === true || String(value).toLowerCase() === 'true' ? '1' : '0'
+}
+
 function encodeSpecials(s: string): string {
   return s
     .replace(/\|/g, '<BMC_SEP>')
@@ -65,6 +71,9 @@ function serializeScript(s: any): string {
       // Encode BMC placeholders for scheduling regex
       const scheduleRegex = (s as any)[field] ?? ''
       value = scheduleRegex ? encodeSpecials(String(scheduleRegex)) : ''
+    }
+    else if (scheduleDayFields.includes(field)) {
+      value = normalizeScheduleDayValue((s as any)[field])
     }
     else value = (s as any)[field] ?? ''
     return value

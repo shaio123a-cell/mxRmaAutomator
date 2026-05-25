@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react'
-import { Button, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, Box } from '@mui/material'
+import { Button, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, Box, Tooltip } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import EditIcon from '@mui/icons-material/Edit'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import { addDevice, deleteDevice, enableDevice, disableDevice, reorderDevices } from '../store/fbcskmSlice'
@@ -21,6 +22,11 @@ function SortableItem({ d, idx, isSelected, selectedId, onSelect, openMenu }: { 
     opacity: isDragging ? 0.5 : 1,
   }
 
+  const enabledScriptErrors = (d.scripts || []).filter((s: any) => !s.disabled && Array.isArray(s.validationErrors) && s.validationErrors.length)
+  const deviceErrorTooltip = enabledScriptErrors.length > 0 && !d.disabled
+    ? `${enabledScriptErrors.length} issue${enabledScriptErrors.length === 1 ? '' : 's'}\n${enabledScriptErrors.slice(0, 10).map((s: any) => `• ${s.instanceName}${s.validationErrors.length > 0 ? ` (${s.validationErrors.join(', ')})` : ''}`).join('\n')}${enabledScriptErrors.length > 10 ? '\n...' : ''}`
+    : ''
+
   return (
     <ListItem ref={setNodeRef} style={style} secondaryAction={
       <IconButton edge='end' onClick={(e) => openMenu(e, d.id)} aria-label='actions' size='small' sx={{ color: isSelected ? '#fff' : undefined }}>
@@ -37,6 +43,11 @@ function SortableItem({ d, idx, isSelected, selectedId, onSelect, openMenu }: { 
       >
         <ListItemText primary={
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {deviceErrorTooltip && (
+              <Tooltip title={deviceErrorTooltip} placement='top'>
+                <ErrorOutlineIcon sx={{ mr: 1, fontSize: 14, color: '#d32f2f' }} />
+              </Tooltip>
+            )}
             {d.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: '#4a148c' }} />}
             {d.disabled && d.originalLine ? (d.originalLine.length > 50 ? d.originalLine.substring(0, 50) + '...' : d.originalLine) : d.name}
           </Box>

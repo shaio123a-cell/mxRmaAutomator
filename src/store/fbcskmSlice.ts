@@ -7,7 +7,8 @@ export interface RestMonArgs {
   url?: string
   payload?: string
   outputFormat?: 'json' | 'xml' | 'text'
-  method?: 'GET' | 'POST'
+  validationErrors?: string[]
+  [key: string]: any
   searchKey?: string
   searchString?: string
   matchRegex?: string
@@ -28,6 +29,7 @@ export interface ScriptInstance {
   regexField?: string
   isRestmon?: boolean
   dirty?: boolean
+  validationErrors?: string[]
   [key: string]: any
 }
 
@@ -158,6 +160,41 @@ function parseArgsToStruct(argstr: string): RestMonArgs {
   return args
 }
 
+const scheduleDayFields = ['scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday', 'scriptSunday']
+
+function normalizeScheduleDayValue(value: any): string {
+  return value === '1' || value === 1 || value === true || String(value).toLowerCase() === 'true' ? '1' : '0'
+}
+
+function isScheduleEnabled(script: any): boolean {
+  const value = script?.scriptSchedulingEnable
+  return value === '1' || value === 1 || value === true || String(value).toLowerCase() === 'true'
+}
+
+function getScriptValidationErrors(script: ScriptInstance): string[] {
+  const errors: string[] = []
+  if (script.isRestmon && script.args && typeof script.args === 'object') {
+    const format = String(script.args.outputFormat || '').toLowerCase()
+    if (format === 'json' && script.args.payload) {
+      try {
+        JSON.parse(script.args.payload)
+      } catch {
+        errors.push('Invalid JSON payload format')
+      }
+    }
+  }
+  if (isScheduleEnabled(script)) {
+    const missing = scheduleDayFields.filter(day => {
+      const value = (script as any)[day]
+      return value !== '1' && value !== 1 && value !== true && value !== '0' && value !== 0 && value !== false
+    })
+    if (missing.length > 0) {
+      errors.push('Inactive weekdays must be explicit 0/1')
+    }
+  }
+  return errors
+}
+
 /**
  * Parse a single FBCSKM line (device + scripts).
  */
@@ -194,6 +231,7 @@ function parseLine(line: string) {
     let instanceName = '', scriptPath = '', argstrRaw = '', poll: number | undefined, tout: number | undefined, regex: string | undefined
 
     const extra: any = {}
+    const missingScheduleDays: string[] = []
 
     config.scriptStructure.fields.forEach((field, i) => {
       if (!field.trim()) return
@@ -212,6 +250,10 @@ function parseLine(line: string) {
         // Decode BMC placeholders for scheduling regex
         extra[field] = value ? value.replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*') : value
       }
+      else if (scheduleDayFields.includes(field)) {
+        if (value === '' || value === undefined) missingScheduleDays.push(field)
+        extra[field] = normalizeScheduleDayValue(value)
+      }
       else extra[field] = value
     })
 
@@ -223,7 +265,7 @@ function parseLine(line: string) {
     const args = parseArgsToStruct(argstr)
     const isRestmon = argstr.includes('-') // Simple check: if has -, it's Restmon
 
-    dev.scripts.push({
+    const script: ScriptInstance = {
       id: uuid(),
       instanceName,
       scriptPath,
@@ -233,7 +275,9 @@ function parseLine(line: string) {
       regexField: regex,
       isRestmon,
       ...extra
-    })
+    }
+    script.validationErrors = getScriptValidationErrors(script)
+    dev.scripts.push(script)
   }
 
   return dev
@@ -388,14 +432,22 @@ const slice = createSlice({
     },
     addScript(state, action: PayloadAction<{ deviceId: string, script: ScriptInstance }>) {
       const d = state.devices.find(x => x.id === action.payload.deviceId)
-      if (d) d.scripts.push(action.payload.script)
+      if (d) {
+        const script = { ...action.payload.script }
+        script.validationErrors = getScriptValidationErrors(script)
+        d.scripts.push(script)
+      }
       state.dirty = true
     },
     updateScript(state, action: PayloadAction<{ deviceId: string, script: ScriptInstance }>) {
       const d = state.devices.find(x => x.id === action.payload.deviceId)
       if (!d) return
       const i = d.scripts.findIndex(s => s.id === action.payload.script.id)
-      if (i >= 0) d.scripts[i] = { ...action.payload.script, dirty: true }
+      if (i >= 0) {
+        const script = { ...action.payload.script, dirty: true }
+        script.validationErrors = getScriptValidationErrors(script)
+        d.scripts[i] = script
+      }
       state.dirty = true
     },
     enableDevice(state, action: PayloadAction<string>) {
