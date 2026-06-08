@@ -204,7 +204,7 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
       scriptPath,
       args: isRestmon ? { method: 'GET', outputFormat: 'json' } : '',
       pollIntervalSec: 300,
-      timeoutSec: 300,
+      timeoutSec: 30,
       isRestmon
     }
     dispatch(addScript({ deviceId: dev.id, script }))

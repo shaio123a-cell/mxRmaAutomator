@@ -119,7 +119,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean, onClo
         <DialogTitle>Configuration</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant='subtitle1'>New Device Default Settings</Typography>
+            <Typography variant='h6' sx={{ fontWeight: 600, mt: 2, mb: 1, pb: 1, borderBottom: '2px solid', borderColor: 'primary.main' }}>New Device Default Settings</Typography>
             <Typography variant='body2' color='text.secondary'>These defaults apply to newly created devices only (not name or IP).</Typography>
             <Stack direction='row' spacing={1}>
               <TextField label='Port' value={port ?? ''} onChange={e => setPort(e.target.value)} size='small' />
@@ -138,7 +138,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean, onClo
 
             <Divider />
 
-            <Typography variant='subtitle1'>New Script Default Settings</Typography>
+            <Typography variant='h6' sx={{ fontWeight: 600, mt: 2, mb: 1, pb: 1, borderBottom: '2px solid', borderColor: 'primary.main' }}>New Script Default Settings</Typography>
             <Typography variant='body2' color='text.secondary'>MatrixKB RestMon path and default for Generic scripts (for now Generic defaults to MatrixKB path).</Typography>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField label='MatrixKB RestMon Script Path' value={matrixPath} onChange={e => setMatrixPath(e.target.value)} size='small' fullWidth />
@@ -184,8 +184,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean, onClo
 
             <Divider />
 
-            <Typography variant='subtitle1'>File Backup Settings</Typography>
-            <Typography variant='body2' color='text.secondary'>Configure automatic file versioning when saving.</Typography>
+            <Typography variant='h6' sx={{ fontWeight: 600, mt: 2, mb: 1, pb: 1, borderBottom: '2px solid', borderColor: 'primary.main' }}>Configuration File Backup Settings</Typography>
+            <Typography variant='body2' color='text.secondary'>Configure automatic scripting configuration file versioning when saving.</Typography>
             <Stack direction="row" spacing={2} alignItems="center">
               <TextField
                 label='Max Backups to Keep'

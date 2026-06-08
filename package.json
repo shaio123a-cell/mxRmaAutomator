@@ -1,6 +1,6 @@
 {
   "name": "fbcskm-manager",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "private": true,
   "description": "matrixKB RestMon Super - React web app with CRUD, Device Form, encoded command rules, backups",
   "main": "electron/main.js",
