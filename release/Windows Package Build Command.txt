@@ -1,1 +1,2 @@
-npx electron-builder --win --dir
+cd /workspaces/mxRmaAutomator
+npx electron-builder --win portable
