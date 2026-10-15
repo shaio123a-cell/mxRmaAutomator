@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^node -e 'const fs=require\\(\"fs\"\\);const p=\"/home/codespace/\\.vscode-remote/data/User/workspaceStorage/-43f3d563/GitHub\\.copilot-chat/transcripts/826ffe9b-9814-416f-95a1-3f6e7ddee345\\.jsonl\";let n=0;for\\(const l of fs\\.readFileSync\\(p,\"utf8\"\\)\\.split\\(\"\\\\n\"\\)\\)\\{if\\(!l\\)continue;const r=JSON\\.parse\\(l\\);for\\(const t of r\\.data\\?\\.toolRequests\\|\\|\\[\\]\\)\\{if\\(t\\.name===\"multi_replace_string_in_file\"\\)\\{const a=JSON\\.parse\\(t\\.arguments\\);console\\.log\\(\"BATCH\",\\+\\+n\\);for\\(const x of a\\.replacements\\|\\|\\[\\]\\)console\\.log\\(x\\.filePath\\.split\\(\"/\"\\)\\.slice\\(-2\\)\\.join\\(\"/\"\\),\"old\",x\\.oldString\\.length,\"new\",x\\.newString\\.length,JSON\\.stringify\\(x\\.oldString\\.slice\\(0,90\\)\\)\\)\\}\\}\\}'$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

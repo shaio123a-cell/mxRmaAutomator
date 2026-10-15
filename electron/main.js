@@ -1,6 +1,43 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const APP_DATA_FOLDER = 'mxRestmonSuperSonic';
+
+function getPersistentDataDirectory() {
+  return path.join(app.getPath('appData'), APP_DATA_FOLDER);
+}
+
+async function migrateLegacyAppData() {
+  const legacyRoot = app.getPath('userData');
+  const persistentRoot = getPersistentDataDirectory();
+  if (path.resolve(legacyRoot) === path.resolve(persistentRoot)) return;
+
+  await fs.mkdir(persistentRoot, { recursive: true });
+  const legacySettings = path.join(legacyRoot, 'ai-settings.json');
+  const persistentSettings = path.join(persistentRoot, 'ai-settings.json');
+  try {
+    await fs.access(persistentSettings);
+  } catch {
+    try { await fs.copyFile(legacySettings, persistentSettings) } catch (error) {
+      if (error.code !== 'ENOENT') console.warn('Unable to migrate legacy AI settings.', error);
+    }
+  }
+
+  const legacyChats = path.join(legacyRoot, 'agentic-chats');
+  const persistentChats = path.join(persistentRoot, 'agentic-chats');
+  try {
+    await fs.mkdir(persistentChats, { recursive: true });
+    for (const entry of await fs.readdir(legacyChats, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const destination = path.join(persistentChats, entry.name);
+      try { await fs.access(destination) } catch {
+        await fs.copyFile(path.join(legacyChats, entry.name), destination)
+      }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('Unable to migrate legacy chat history.', error);
+  }
+}
 
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -31,7 +68,10 @@ if (!gotTheLock) {
     }
   })
 
-  app.whenReady().then(createWindow)
+  app.whenReady().then(async () => {
+    await migrateLegacyAppData()
+    createWindow()
+  })
 }
 
 let mainWindow;
@@ -84,7 +124,11 @@ ipcMain.handle('open-file', async (event, filter) => {
 ipcMain.handle('save-file', async (event, suggestedName) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: suggestedName,
-    filters: [{ name: 'Text Files', extensions: ['txt', 'cfg', 'config'] }],
+    filters: [
+      { name: 'Scripts', extensions: ['sh', 'ps1', 'bat', 'cmd', 'py'] },
+      { name: 'Text and configuration files', extensions: ['txt', 'cfg', 'config'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
   });
   return result.canceled ? null : result.filePath;
 });
@@ -230,4 +274,92 @@ ipcMain.handle('select-path', async (event, options) => {
     filters: options?.filters || []
   })
   return result.canceled ? null : result.filePaths[0];
+})
+
+function getAgenticChatsDirectory() {
+  return path.join(getPersistentDataDirectory(), 'agentic-chats')
+}
+
+function getAgenticChatPath(id) {
+  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)) {
+    throw new Error('Invalid chat ID.')
+  }
+  return path.join(getAgenticChatsDirectory(), `${id}.json`)
+}
+
+ipcMain.handle('agentic-chats:list', async () => {
+  const directory = getAgenticChatsDirectory()
+  await fs.mkdir(directory, { recursive: true })
+  const entries = await fs.readdir(directory, { withFileTypes: true })
+  const chats = await Promise.all(entries
+    .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+    .map(async entry => {
+      try {
+        return JSON.parse(await fs.readFile(path.join(directory, entry.name), 'utf8'))
+      } catch (error) {
+        console.error(`Unable to read saved chat ${entry.name}`, error)
+        return null
+      }
+    }))
+  return chats.filter(Boolean).sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
+})
+
+ipcMain.handle('agentic-chats:load', async (event, id) => {
+  try {
+    return JSON.parse(await fs.readFile(getAgenticChatPath(id), 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+})
+
+ipcMain.handle('agentic-chats:save', async (event, chat) => {
+  if (!chat || typeof chat !== 'object' || typeof chat.id !== 'string') {
+    throw new Error('Invalid chat record.')
+  }
+  const filePath = getAgenticChatPath(chat.id)
+  await fs.mkdir(getAgenticChatsDirectory(), { recursive: true })
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await fs.writeFile(temporaryPath, JSON.stringify(chat), 'utf8')
+    await fs.rename(temporaryPath, filePath)
+  } finally {
+    await fs.unlink(temporaryPath).catch(() => {})
+  }
+})
+
+ipcMain.handle('agentic-chats:delete', async (event, id) => {
+  try {
+    await fs.unlink(getAgenticChatPath(id))
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+})
+
+function getAiSettingsPath() {
+  return path.join(getPersistentDataDirectory(), 'ai-settings.json')
+}
+
+ipcMain.handle('ai-settings:load', async () => {
+  try {
+    return JSON.parse(await fs.readFile(getAiSettingsPath(), 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+})
+
+ipcMain.handle('ai-settings:save', async (event, settings) => {
+  if (!settings || !Array.isArray(settings.models) || !Array.isArray(settings.prompts)) {
+    throw new Error('Invalid AI settings record.')
+  }
+  const filePath = getAiSettingsPath()
+  await fs.mkdir(getPersistentDataDirectory(), { recursive: true })
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await fs.writeFile(temporaryPath, JSON.stringify(settings), 'utf8')
+    await fs.rename(temporaryPath, filePath)
+  } finally {
+    await fs.unlink(temporaryPath).catch(() => {})
+  }
 })

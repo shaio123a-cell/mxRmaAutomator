@@ -1,7 +1,7 @@
 
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { v4 as uuid } from 'uuid'
-import config from '../config'
+import config, { type AIModelConfig, type AISystemPrompt } from '../config'
 
 export interface RestMonArgs {
   url?: string
@@ -60,12 +60,25 @@ export interface DefaultScriptSettings {
   maxBackups?: number
 }
 
+export interface AgenticScriptDraft {
+  id: string
+  name: string
+  content: string
+  prompt: string
+  modelName: string
+  createdAt: string
+}
+
 export interface FBCSKMState {
   devices: Device[]
   originalLines?: string[]
   dirty?: boolean
   defaultDeviceSettings?: Partial<Omit<Device, 'id' | 'name' | 'forcedIp' | 'scripts'>>
   defaultScriptSettings?: DefaultScriptSettings
+  aiModels: AIModelConfig[]
+  systemPrompts: AISystemPrompt[]
+  activeSystemPromptId: string | null
+  agenticScripts: AgenticScriptDraft[]
 }
 
 const initialState: FBCSKMState = {
@@ -87,7 +100,11 @@ const initialState: FBCSKMState = {
     genericPath: 'c:/MatrixKB/Scripts',
     isRestmonDefault: true,
     maxBackups: 10
-  }
+  },
+  aiModels: config.ai?.models ?? [],
+  systemPrompts: config.ai?.systemPrompts ?? [],
+  activeSystemPromptId: config.ai?.activeSystemPromptId ?? null,
+  agenticScripts: []
 }
 
 /**
@@ -490,6 +507,48 @@ const slice = createSlice({
     setDefaultScriptSettings(state, action: PayloadAction<DefaultScriptSettings>) {
       state.defaultScriptSettings = action.payload
     },
+    setAiModels(state, action: PayloadAction<AIModelConfig[]>) {
+      state.aiModels = action.payload
+    },
+    reorderAiModels(state, action: PayloadAction<{ from: number, to: number }>) {
+      const { from, to } = action.payload
+      const next = [...state.aiModels]
+      const [moved] = next.splice(from, 1)
+      if (!moved) return
+      next.splice(to, 0, moved)
+      state.aiModels = next
+    },
+    upsertAiModel(state, action: PayloadAction<AIModelConfig>) {
+      const index = state.aiModels.findIndex(model => model.id === action.payload.id)
+      if (index >= 0) state.aiModels[index] = action.payload
+      else state.aiModels.push(action.payload)
+    },
+    deleteAiModel(state, action: PayloadAction<string>) {
+      state.aiModels = state.aiModels.filter(model => model.id !== action.payload)
+    },
+    setSystemPrompts(state, action: PayloadAction<AISystemPrompt[]>) {
+      state.systemPrompts = action.payload
+    },
+    upsertSystemPrompt(state, action: PayloadAction<AISystemPrompt>) {
+      const index = state.systemPrompts.findIndex(prompt => prompt.id === action.payload.id)
+      if (index >= 0) state.systemPrompts[index] = action.payload
+      else state.systemPrompts.push(action.payload)
+    },
+    deleteSystemPrompt(state, action: PayloadAction<string>) {
+      state.systemPrompts = state.systemPrompts.filter(prompt => prompt.id !== action.payload)
+      if (state.activeSystemPromptId === action.payload) {
+        state.activeSystemPromptId = state.systemPrompts[0]?.id ?? null
+      }
+    },
+    setActiveSystemPromptId(state, action: PayloadAction<string | null>) {
+      state.activeSystemPromptId = action.payload
+    },
+    addAgenticScript(state, action: PayloadAction<AgenticScriptDraft>) {
+      state.agenticScripts.unshift(action.payload)
+    },
+    deleteAgenticScript(state, action: PayloadAction<string>) {
+      state.agenticScripts = state.agenticScripts.filter(script => script.id !== action.payload)
+    },
     reorderDevices(state, action: PayloadAction<Device[]>) {
       state.devices = action.payload.map(d => ({ ...d, originalLineIndex: undefined }))
       state.originalLines = [] // Clear original lines to avoid duplication after reorder
@@ -519,6 +578,16 @@ export const {
   setClipboard,
   setDefaultDeviceSettings,
   setDefaultScriptSettings,
+  setAiModels,
+  reorderAiModels,
+  upsertAiModel,
+  deleteAiModel,
+  setSystemPrompts,
+  upsertSystemPrompt,
+  deleteSystemPrompt,
+  setActiveSystemPromptId,
+  addAgenticScript,
+  deleteAgenticScript,
   reorderDevices,
   reorderScripts
 } = slice.actions

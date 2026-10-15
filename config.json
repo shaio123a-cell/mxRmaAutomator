@@ -228,5 +228,44 @@
       "scriptStartTime",
       "scriptEndTime"
     ]
+  },
+  "ai": {
+    "models": [
+      {
+        "id": "model-primary",
+        "name": "Primary GPT",
+        "provider": "openai-compatible",
+        "model": "gpt-4o-mini",
+        "baseUrl": "https://api.openai.com/v1",
+        "apiKey": "",
+        "enabled": true,
+        "timeoutMs": 30000,
+        "status": "healthy"
+      },
+      {
+        "id": "model-fallback",
+        "name": "Fallback Claude",
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet-latest",
+        "baseUrl": "https://api.anthropic.com/v1",
+        "apiKey": "",
+        "enabled": true,
+        "timeoutMs": 45000,
+        "status": "healthy"
+      }
+    ],
+    "systemPrompts": [
+      {
+        "id": "system-default",
+        "name": "Default Automation Prompt",
+        "content": "You are a senior infrastructure automation engineer. Produce valid, production-safe scripts for Linux and Windows environments. Keep scripts readable, well-commented, and practical for real-world administration tasks. Return the complete script in a fenced code block, with a concise explanation outside it."
+      },
+      {
+        "id": "system-restmon",
+        "name": "PATROL RESTMON Prompt",
+        "content": "You are generating PATROL KM / RestMon automation scripts. Follow the user's requested language and existing script conventions. Keep commands readable, validate inputs, handle errors, and return the complete script in a fenced code block."
+      }
+    ],
+    "activeSystemPromptId": "system-default"
   }
 }

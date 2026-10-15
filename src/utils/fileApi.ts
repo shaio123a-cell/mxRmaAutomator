@@ -1,3 +1,48 @@
+import type { AIModelConfig, AISystemPrompt } from '../config'
+
+export interface PersistedAISettings {
+  models: AIModelConfig[]
+  prompts: AISystemPrompt[]
+  activePromptId: string | null
+}
+
+export interface AgenticChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+export interface AgenticChatRecord {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  messages: AgenticChatMessage[]
+  generatedScript: {
+    id: string
+    title: string
+    name: string
+    content: string
+    prompt: string
+    modelName: string
+    createdAt: string
+  } | null
+  generatedScripts: {
+    id: string
+    title: string
+    name: string
+    content: string
+    prompt: string
+    modelName: string
+    createdAt: string
+  }[]
+  suggestions: string[]
+  scriptName: string
+  testOutput: string
+  savedPath: string | null
+}
+
 export const fileApi = {
   openFile: async (): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -118,6 +163,12 @@ export const fileApi = {
     window.open(url, '_blank');
   },
   isElectron: false,
+  listAgenticChats: async (): Promise<AgenticChatRecord[]> => [],
+  loadAgenticChat: async (_id: string): Promise<AgenticChatRecord | null> => null,
+  saveAgenticChat: async (_chat: AgenticChatRecord): Promise<void> => {},
+  deleteAgenticChat: async (_id: string): Promise<void> => {},
+  loadAiSettings: async (): Promise<PersistedAISettings | null> => null,
+  saveAiSettings: async (_settings: PersistedAISettings): Promise<void> => {},
   selectPath: async (options?: { directory?: boolean, file?: boolean, filters?: any[] }): Promise<string | null> => {
     // Basic web fallback - standard file input doesn't support folder selection easily across browsers
     // asking for 'directory' in web is not standard

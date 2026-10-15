@@ -8,24 +8,10 @@ import ScriptForm from '../components/ScriptForm'
 import DeviceForm from '../components/DeviceForm'
 import { useAppSelector } from '../store/store'
 
-declare global {
-  interface Window {
-    electronAPI: {
-      openFile: (filter?: any) => Promise<string | null>
-      saveFile: (suggested: string) => Promise<string | null>
-      readFile: (filePath: string) => Promise<string>
-      writeFile: (filePath: string, content: string, options?: { maxBackups?: number }) => Promise<boolean>
-      rotateBackups: (filePath: string) => Promise<boolean>
-      openInElectron?: () => Promise<void>
-      openExternal?: (url: string) => Promise<void>
-      isElectron?: boolean
-    }
-  }
-}
-
 import ErrorBoundary from '../components/ErrorBoundary'
 import SettingsDialog from '../components/SettingsDialog'
 import HelpDialog from '../components/HelpDialog'
+import AgenticScriptPanel from '../components/AgenticScriptPanel'
 import SettingsIcon from '@mui/icons-material/Settings'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 
@@ -52,10 +38,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [showDisabled, setShowDisabled] = useState(false)
+  const [agenticMode, setAgenticMode] = useState(false)
 
   // Unsaved changes dialog state
   const [unsavedOpen, setUnsavedOpen] = useState(false)
-  const unsavedActionRef = React.useRef<() => void | null>(null)
+  const unsavedActionRef = React.useRef<(() => void) | null>(null)
   const currentUnsavedTargetRef = React.useRef<{ type: 'device' | 'script' | 'closeDeviceForm', payload?: any } | null>(null)
 
   // Search state
@@ -63,6 +50,10 @@ export default function App() {
   const [searchInScripts, setSearchInScripts] = useState(true) // default checked
 
   const devices = useAppSelector(s => s.fbcskm.devices)
+  const isDirty = useAppSelector(s => s.fbcskm.dirty)
+  const aiModels = useAppSelector(s => s.fbcskm.aiModels)
+  const systemPrompts = useAppSelector(s => s.fbcskm.systemPrompts)
+  const activeSystemPromptId = useAppSelector(s => s.fbcskm.activeSystemPromptId)
 
   const [loadUnsavedOpen, setLoadUnsavedOpen] = useState(false)
   const loadPendingPathRef = React.useRef<string | null>(null)
@@ -286,9 +277,27 @@ export default function App() {
     dirtyFormTypeRef.current = null
   }
 
-  return (
-    <ErrorBoundary>
-      <Stack spacing={2} sx={{ py: 3 }}>
+  const appContent = agenticMode ? (
+    <Box sx={{ p: 3, background: '#f8fafc', minHeight: '100vh' }}>
+      <Stack spacing={2}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Typography variant='h4'>Agentic Scripting</Typography>
+          <Button variant='outlined' onClick={() => setAgenticMode(false)}>Back to Main App</Button>
+        </Box>
+        <AgenticScriptPanel
+          models={aiModels}
+          prompts={systemPrompts}
+          activePromptId={activeSystemPromptId}
+          onAddToConfig={(deviceId, scriptId) => {
+            setSelectedDeviceId(deviceId)
+            setSelectedScriptId(scriptId)
+            setAgenticMode(false)
+          }}
+        />
+      </Stack>
+    </Box>
+  ) : (
+    <Stack spacing={2} sx={{ py: 3 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'stretch', width: '100%' }}>
           <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-start' }}>
             <img src={MatrixKBLogo} alt="MatrixKB for BMC Helix" style={{ height: 56 }} />
@@ -296,6 +305,7 @@ export default function App() {
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
             <Typography variant='h4'>PATROL Scripting KM File Based Configuraiton Editor</Typography>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+              <Button variant='contained' onClick={() => setAgenticMode(true)}>Agentic Scripting</Button>
               <IconButton size='small' aria-label='help' onClick={() => setHelpOpen(true)}><HelpOutlineIcon /></IconButton>
               <IconButton size='small' aria-label='settings' onClick={() => setSettingsOpen(true)}><SettingsIcon /></IconButton>
               {window.electronAPI?.isElectron ? (
@@ -344,7 +354,7 @@ export default function App() {
         <Viewer raw={raw} onRawChange={(t: string) => { setRaw(t); /* mark dirty when raw edited */ (async () => { const { setDirty } = await import('../store/fbcskmSlice'); const { store } = await import('../store/store'); store.dispatch(setDirty(true)) })() }} />
 
         {/* Show unsaved indicator when configuration is dirty */}
-        {(useAppSelector(s => s.fbcskm.dirty)) && <Typography color='error' sx={{ ml: 1 }}>Unsaved Changes</Typography>}
+        {isDirty && <Typography color='error' sx={{ ml: 1 }}>Unsaved Changes</Typography>}
 
         {/* Search area */}
         <Stack direction='row' spacing={1} alignItems='center'>
@@ -464,6 +474,11 @@ export default function App() {
         <Snackbar open={Boolean(clipMsg)} autoHideDuration={2000} onClose={() => setClipMsg(null)} message={clipMsg || ''} />
 
       </Stack>
+  )
+
+  return (
+    <ErrorBoundary>
+      {appContent}
     </ErrorBoundary>
   )
 }

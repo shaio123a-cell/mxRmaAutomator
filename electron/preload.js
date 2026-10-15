@@ -10,5 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectPath: (options) => ipcRenderer.invoke('select-path', options),
   openInElectron: () => { },
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  listAgenticChats: () => ipcRenderer.invoke('agentic-chats:list'),
+  loadAgenticChat: (id) => ipcRenderer.invoke('agentic-chats:load', id),
+  saveAgenticChat: (chat) => ipcRenderer.invoke('agentic-chats:save', chat),
+  deleteAgenticChat: (id) => ipcRenderer.invoke('agentic-chats:delete', id),
+  loadAiSettings: () => ipcRenderer.invoke('ai-settings:load'),
+  saveAiSettings: (settings) => ipcRenderer.invoke('ai-settings:save', settings),
   isElectron: true,
 });

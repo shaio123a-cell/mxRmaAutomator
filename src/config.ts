@@ -19,10 +19,36 @@ export interface ScriptUI {
   genericOrder: string[]
 }
 
+export interface AIModelConfig {
+  id: string
+  name: string
+  provider: 'openai-compatible' | 'anthropic' | 'google-gemini' | 'azure-openai' | 'ollama' | 'mock'
+  model: string
+  baseUrl: string
+  apiKey: string
+  enabled: boolean
+  timeoutMs: number
+  apiVersion?: string
+  status: 'healthy' | 'degraded' | 'offline'
+}
+
+export interface AISystemPrompt {
+  id: string
+  name: string
+  content: string
+}
+
+export interface AIConfig {
+  models: AIModelConfig[]
+  systemPrompts: AISystemPrompt[]
+  activeSystemPromptId: string | null
+}
+
 export interface Config {
   client: string
   scriptStructure: ScriptStructure
   scriptUI: ScriptUI
+  ai: AIConfig
 }
 
 const config: Config = configData as Config
