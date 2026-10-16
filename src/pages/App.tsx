@@ -289,6 +289,7 @@ export default function App() {
           prompts={systemPrompts}
           activePromptId={activeSystemPromptId}
           onAddToConfig={(deviceId, scriptId) => {
+            setSearchText('')
             setSelectedDeviceId(deviceId)
             setSelectedScriptId(scriptId)
             setAgenticMode(false)

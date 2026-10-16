@@ -19,7 +19,11 @@ import {
   Stack,
   TextField,
   Typography,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
 } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -92,6 +96,7 @@ export default function AgenticScriptPanel({
   const [generatedScripts, setGeneratedScripts] = useState<AiGeneratedScript[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [statusText, setStatusText] = useState('Describe the script you want to create.')
+  const [showTestOutput, setShowTestOutput] = useState(false)
   const [testOutput, setTestOutput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
@@ -408,10 +413,17 @@ export default function AgenticScriptPanel({
     }
   }
 
-  const saveScript = async (): Promise<string | null> => {
+  const saveScript = async (forceSaveAs = false): Promise<string | null> => {
     if (!generatedScript) return null
     const finalName = scriptName.trim() || generatedScript.name
     try {
+      // If we already have a saved path and not forcing save as, just overwrite it
+      if (savedPath && !forceSaveAs && window.electronAPI.writeFile) {
+        await window.electronAPI.writeFile(savedPath, generatedScript.content)
+        setLastChatActivityAt(new Date().toISOString())
+        setStatusText(`Saved script to ${savedPath}.`)
+        return savedPath
+      }
       const target = await window.electronAPI.saveFile(finalName)
       if (!target) return null
       await window.electronAPI.writeFile(target, generatedScript.content)
@@ -433,30 +445,40 @@ export default function AgenticScriptPanel({
       setStatusText('Add a device in the main app before configuring this script.')
       return
     }
-    const scriptPath = savedPath || await saveScript()
-    if (!scriptPath) return
 
-    const baseName = (scriptName.trim() || generatedScript.name).replace(/\.[^.]+$/, '') || 'AI_Generated'
-    let instanceName = baseName
-    let suffix = 1
-    while (device.scripts.some(script => script.instanceName === instanceName)) {
-      instanceName = `${baseName}_${suffix++}`
+    try {
+      // Always save the current script content before configuring the device
+      const scriptPath = await saveScript(false)
+      if (!scriptPath) {
+        setStatusText('Script was not saved, so nothing was added to the device.')
+        return
+      }
+
+      const baseName = (scriptName.trim() || generatedScript.name).replace(/\.[^.]+$/, '') || 'AI_Generated'
+      let instanceName = baseName
+      let suffix = 1
+      while (device.scripts.some(script => script.instanceName === instanceName)) {
+        instanceName = `${baseName}_${suffix++}`
+      }
+      const scriptId = crypto.randomUUID()
+      dispatch(addScript({
+        deviceId: device.id,
+        script: {
+          id: scriptId,
+          instanceName,
+          scriptPath,
+          args: '',
+          pollIntervalSec: 300,
+          timeoutSec: 30,
+          isRestmon: false,
+        },
+      }))
+      setStatusText(`Added ${instanceName} to ${device.name}. Continue editing it below.`)
+      // Switch to the main app and open the new script in the editor
+      onAddToConfig?.(device.id, scriptId)
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : 'Unable to configure the script on the device.')
     }
-    const scriptId = crypto.randomUUID()
-    dispatch(addScript({
-      deviceId: device.id,
-      script: {
-        id: scriptId,
-        instanceName,
-        scriptPath,
-        args: '',
-        pollIntervalSec: 300,
-        timeoutSec: 30,
-        isRestmon: false,
-      },
-    }))
-    setStatusText(`Added ${instanceName} to ${device.name}.`)
-    onAddToConfig?.(device.id, scriptId)
   }
 
   const testScript = async () => {
@@ -470,8 +492,12 @@ export default function AgenticScriptPanel({
 
     setLastChatActivityAt(new Date().toISOString())
     setTestOutput('Running script...')
+    setShowTestOutput(true)
     try {
-      const result = await window.electronAPI.runCommand(generatedScript.content)
+      const isPowerShell = scriptName.toLowerCase().endsWith('.ps1')
+      const result = isPowerShell
+        ? await window.electronAPI.encodeScript(generatedScript.content)
+        : await window.electronAPI.runCommand(generatedScript.content)
       setTestOutput(result.error
         ? `Error: ${result.error}\nStdout:\n${result.stdout}\nStderr:\n${result.stderr}`
         : `Stdout:\n${result.stdout}\nStderr:\n${result.stderr}`)
@@ -480,6 +506,8 @@ export default function AgenticScriptPanel({
       const message = error instanceof Error ? error.message : 'Script test failed.'
       setTestOutput(message)
       setStatusText(message)
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -612,35 +640,97 @@ export default function AgenticScriptPanel({
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           <Button variant='outlined' onClick={() => void copyScript()} disabled={!generatedScript} startIcon={<ContentCopyIcon />}>Copy</Button>
-          <Button variant='outlined' onClick={() => void saveScript()} disabled={!generatedScript} startIcon={<SaveAltIcon />}>Save As</Button>
-          <Button variant='outlined' onClick={() => void testScript()} disabled={!generatedScript} startIcon={<PlayArrowIcon />}>Test Run</Button>
+          <Button variant='outlined' onClick={() => void saveScript(false)} disabled={!generatedScript} startIcon={<SaveAltIcon />}>Save</Button>
+          <Button variant='outlined' onClick={() => void saveScript(true)} disabled={!generatedScript} startIcon={<SaveAltIcon />}>Save As</Button>
+          <Button variant='outlined' onClick={() => {
+      void testScript()
+      setShowTestOutput(true)
+    }} disabled={!generatedScript} startIcon={<PlayArrowIcon />}>Test Run</Button>
           <TextField select size='small' label='Target device' value={targetDeviceId || devices[0]?.id || ''} onChange={event => setTargetDeviceId(event.target.value)} sx={{ minWidth: 200 }}>
             {devices.map(device => <MenuItem key={device.id} value={device.id}>{device.name}</MenuItem>)}
           </TextField>
-          <Button variant='outlined' onClick={() => void addToConfiguration()} disabled={!generatedScript || devices.length === 0}>Add to app config</Button>
+          <Button variant='contained' color='primary' onClick={() => void addToConfiguration()} disabled={!generatedScript || devices.length === 0}>Configure to Device</Button>
         </Box>
 
         <Typography variant='caption' color='text.secondary'>{statusText}</Typography>
-        {generatedScripts.length > 1 && (
-          <TextField
-            select
-            size='small'
-            label='Script results in this chat'
-            value={generatedScript?.id ?? ''}
-            onChange={event => {
-              const selected = generatedScripts.find(script => script.id === event.target.value)
-              if (!selected) return
-              setGeneratedScript(selected)
-              setScriptName(selected.name)
-              setSavedPath(null)
-            }}
-            fullWidth
+
+        {showTestOutput && testOutput && (
+          <Accordion
+            sx={{ width: '100%', my: 1 }}
+            defaultExpanded
+            disableGutters
           >
-            {generatedScripts.map((script, index) => (
-              <MenuItem key={script.id} value={script.id}>{index + 1}. {script.name} · {script.modelName}</MenuItem>
-            ))}
-          </TextField>
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon />}
+              aria-controls="panel1a-content"
+              id="panel1a-header"
+              sx={{
+                backgroundColor: '#f8fafc',
+                color: '#1d4ed8',
+                '& .Mui-expanded': { 
+                  backgroundColor: '#f0f9ff', 
+                  color: '#1d4ed8' 
+                },
+                minHeight: 48,
+                '&:hover': { backgroundColor: '#f0f9ff' }
+              }}
+            >
+              <Typography variant='subtitle2' sx={{ flex: 1 }}>Test Run Output</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 3, py: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant='subtitle2' color='#1d4ed8'>Test Run Output</Typography>
+                <IconButton
+                  aria-label='Close test output'
+                  sx={{ padding: 0, margin: -4 }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setShowTestOutput(false)
+                  }}
+                >
+                  ✕
+                </IconButton>
+              </Box>
+              {testOutput ? (
+                <pre style={{ 
+                  margin: 0, 
+                  whiteSpace: 'pre-wrap', 
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', 
+                  fontSize: 13, 
+                  color: '#0f172a', 
+                  lineHeight: 1.6 
+                }}>{testOutput}</pre>
+              ) : (
+                <Typography variant='body2' color='text.secondary' sx={{ p: 1 }}>Running test…</Typography>
+              )}
+            </AccordionDetails>
+          </Accordion>
         )}
+
+        {!testOutput && showTestOutput && (
+          <Typography variant='body2' color='text.secondary' sx={{ p: 1 }}>Running test…</Typography>
+        )}
+
+        <Divider />
+
+        <TextField
+          select
+          size='small'
+          label='Script results in this chat'
+          value={generatedScript?.id ?? ''}
+          onChange={event => {
+            const selected = generatedScripts.find(script => script.id === event.target.value)
+            if (!selected) return
+            setGeneratedScript(selected)
+            setScriptName(selected.name)
+            setSavedPath(null)
+          }}
+          fullWidth
+        >
+          {generatedScripts.map((script, index) => (
+            <MenuItem key={script.id} value={script.id}>{index + 1}. {script.name} · {script.modelName}</MenuItem>
+          ))}
+        </TextField>
         <Divider />
 
         <TextField
@@ -666,12 +756,6 @@ export default function AgenticScriptPanel({
           />
         </Box>
 
-        {testOutput && (
-          <Box sx={{ background: '#f8fafc', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 1, p: 2 }}>
-            <Typography variant='subtitle2' sx={{ mb: 1, color: '#1d4ed8' }}>Test Run Output</Typography>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, color: '#0f172a', lineHeight: 1.6 }}>{testOutput}</pre>
-          </Box>
-        )}
       </Stack>
       </Box>
       <Dialog open={renameDialogOpen} onClose={() => setRenameDialogOpen(false)} maxWidth='xs' fullWidth>

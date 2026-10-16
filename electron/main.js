@@ -263,6 +263,34 @@ ipcMain.handle('run-command', async (event, command) => {
   })
 })
 
+ipcMain.handle('encode-script', async (event, script) => {
+  const { exec } = require('child_process')
+  const os = require('os')
+  const path = require('path')
+  const fs = require('fs').promises
+
+  const tmpName = 'agentic-test.ps1'
+  const tmpPath = path.join(os.tmpdir(), tmpName)
+
+  try {
+    await fs.writeFile(tmpPath, script, 'utf8')
+    const command = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tmpPath}"`
+    return new Promise((resolve, reject) => {
+      exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
+        try { fs.unlinkSync(tmpPath) } catch {}
+        if (error) {
+          resolve({ error: error.message, stdout, stderr })
+        } else {
+          resolve({ stdout, stderr })
+        }
+      })
+    })
+  } catch (e) {
+    try { fs.unlinkSync(tmpPath) } catch {}
+    return { error: e.message, stdout: '', stderr: '' }
+  }
+})
+
 ipcMain.handle('select-path', async (event, options) => {
   const properties = []
   if (options?.directory) properties.push('openDirectory')

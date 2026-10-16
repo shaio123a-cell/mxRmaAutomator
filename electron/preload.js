@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveAgenticChat: (chat) => ipcRenderer.invoke('agentic-chats:save', chat),
   deleteAgenticChat: (id) => ipcRenderer.invoke('agentic-chats:delete', id),
   loadAiSettings: () => ipcRenderer.invoke('ai-settings:load'),
-  saveAiSettings: (settings) => ipcRenderer.invoke('ai-settings:save', settings),
+  saveAiSettings: (settings) => ipcRenderer.invoke('ai-settings:save'),
+  encodeScript: (script) => ipcRenderer.invoke('encode-script', script),
   isElectron: true,
 });

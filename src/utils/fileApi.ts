@@ -155,6 +155,9 @@ export const fileApi = {
   runCommand: async (command: string): Promise<{ stdout: string; stderr: string; error?: string }> => {
     return { stdout: '', stderr: 'Dry run not available in web mode', error: 'Not available' };
   },
+  encodeScript: async (script: string): Promise<{ stdout: string; stderr: string; error?: string }> => {
+    return { stdout: '', stderr: 'Script execution is only available in the desktop app.', error: 'Not available' };
+  },
   openInElectron: async (): Promise<void> => {
     // Attempt to open the custom protocol link
     window.location.href = 'mxrma://open';
