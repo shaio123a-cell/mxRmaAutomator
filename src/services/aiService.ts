@@ -12,6 +12,8 @@ export interface AiGeneratedScript {
   prompt: string
   modelName: string
   createdAt: string
+  summary?: string
+  actionsRequired?: string[]
 }
 
 export interface AiConversationTurn {
@@ -67,20 +69,48 @@ function parseSuggestions(response: string): string[] {
   return parseSuggestionList(response).slice(0, 3)
 }
 
-function parseResponse(response: string): { script: string; suggestions: string[]; title: string; fileName: string; language: string } {
+function parseActionItems(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map(item => item.replace(/^[-*\u2022]\s*|^\d+[.)]\s*/, '').trim())
+      .filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/\r?\n/)
+      .map(line => line.replace(/^[-*\u2022]\s*|^\d+[.)]\s*/, '').trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+function parseActionItemsFromText(response: string): string[] {
+  const match = response.match(/^(?:ACTIONS_REQUIRED|SETUP_REQUIRED|SETUP_NOTES):\s*$([\s\S]*?)(?=^\s*[A-Z][A-Z_]*:|\s*```|$)/im)
+  if (!match) return []
+  return parseActionItems(match[1])
+}
+
+function parseResponse(response: string): { script: string; suggestions: string[]; title: string; fileName: string; language: string; summary: string; actionsRequired: string[] } {
   try {
     const parsed = JSON.parse(response)
     if (parsed && typeof parsed === 'object') {
       const script = typeof parsed.script === 'string' ? parsed.script : typeof parsed.content === 'string' ? parsed.content : ''
-      const suggestions = Array.isArray(parsed.suggestions)
-        ? parsed.suggestions.filter((item: unknown): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 3)
-        : []
-      if (script) return {
-        script: extractScript(script),
-        suggestions,
-        title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
-        fileName: typeof parsed.fileName === 'string' ? parsed.fileName.trim() : typeof parsed.name === 'string' ? parsed.name.trim() : '',
-        language: typeof parsed.language === 'string' ? parsed.language.trim() : '',
+      if (script) {
+        const suggestions = Array.isArray(parsed.suggestions)
+          ? parsed.suggestions.filter((item: unknown): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 3)
+          : []
+        const summaryValue = typeof parsed.summary === 'string' ? parsed.summary : typeof parsed.description === 'string' ? parsed.description : ''
+        const actions = parseActionItems(parsed.actionsRequired ?? parsed.setupRequired ?? parsed.actions ?? parsed.setup)
+        return {
+          script: extractScript(script),
+          suggestions,
+          title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
+          fileName: typeof parsed.fileName === 'string' ? parsed.fileName.trim() : typeof parsed.name === 'string' ? parsed.name.trim() : '',
+          language: typeof parsed.language === 'string' ? parsed.language.trim() : '',
+          summary: summaryValue.trim(),
+          actionsRequired: actions,
+        }
       }
     }
   } catch {
@@ -94,6 +124,8 @@ function parseResponse(response: string): { script: string; suggestions: string[
     title: metadata('SCRIPT_TITLE'),
     fileName: metadata('SCRIPT_NAME'),
     language: metadata('SCRIPT_LANGUAGE') || fenced?.[1] || '',
+    summary: metadata('SCRIPT_SUMMARY') || metadata('SUMMARY'),
+    actionsRequired: parseActionItemsFromText(response),
   }
 }
 
@@ -249,6 +281,11 @@ async function requestModel(model: AiModelConfig, prompt: string, systemPrompt: 
       title: `Automation for ${prompt.replace(/[\r\n]+/g, ' ').slice(0, 36)}`,
       fileName: slugify(prompt),
       language: 'bash',
+      summary: `Mock script that echoes a placeholder for the request: ${prompt.replace(/[\r\n]+/g, ' ').slice(0, 80)}`,
+      actionsRequired: [
+        'Replace the placeholder body with the real commands for this request.',
+        'Confirm the script runs on the target host (bash required).',
+      ],
       script: `#!/usr/bin/env bash\nset -euo pipefail\n\n# Request: ${prompt.replace(/[\r\n]+/g, ' ')}\nprintf '%s\\n' "Implement the requested automation here."\n`,
       suggestions: [
         `Add input validation for the requirements in: ${prompt}`,
@@ -351,7 +388,7 @@ export async function generateScriptFromPrompt(
   const attemptedModels: string[] = []
   const failedModels: string[] = []
   const failures: string[] = []
-  const responseInstructions = `${systemPrompt}\n\nReturn a concise purpose-based title and a filename base that describes what the script does, not a copy of the user's request. Detect the language of the script you actually generate. Format your response as:\nSCRIPT_TITLE: concise human-readable title\nSCRIPT_NAME: short-purpose-based-filename-without-extension\nSCRIPT_LANGUAGE: language-name\nInclude the complete script in one fenced code block labelled with that language.\nNEXT_PROMPTS: ["first relevant follow-up", "second relevant follow-up", "third relevant follow-up"]\nDo not include an extension in SCRIPT_NAME; the application adds the extension from SCRIPT_LANGUAGE.`
+  const responseInstructions = `${systemPrompt}\n\nReturn a concise purpose-based title and a filename base that describes what the script does, not a copy of the user's request. Detect the language of the script you actually generate. Format your response as:\nSCRIPT_TITLE: concise human-readable title\nSCRIPT_NAME: short-purpose-based-filename-without-extension\nSCRIPT_LANGUAGE: language-name\nSCRIPT_SUMMARY: one or two sentences describing what the script does, what it connects to, and what it outputs. If this request modifies a previously generated script, describe what you changed or added instead.\nACTIONS_REQUIRED:\n- concrete step the user must do before this script can run (e.g. define credentials, edit a placeholder value, install a tool, grant permissions)\n- next step if any; omit this section entirely if nothing is required\nInclude the complete script in one fenced code block labelled with that language.\nNEXT_PROMPTS: ["first relevant follow-up", "second relevant follow-up", "third relevant follow-up"]\nDo not include an extension in SCRIPT_NAME; the application adds the extension from SCRIPT_LANGUAGE.`
   for (const model of chain) {
     attemptedModels.push(model.name)
     try {
@@ -392,6 +429,8 @@ export async function generateScriptFromPrompt(
           prompt: normalizedPrompt,
           modelName: model.name,
           createdAt: new Date().toISOString(),
+          summary: parsed.summary,
+          actionsRequired: parsed.actionsRequired,
         },
         suggestions,
         usedFallback: attemptedModels.length > 1,

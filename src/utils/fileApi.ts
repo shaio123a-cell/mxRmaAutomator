@@ -29,6 +29,8 @@ export interface AgenticChatRecord {
     prompt: string
     modelName: string
     createdAt: string
+    summary?: string
+    actionsRequired?: string[]
   } | null
   generatedScripts: {
     id: string
@@ -38,6 +40,8 @@ export interface AgenticChatRecord {
     prompt: string
     modelName: string
     createdAt: string
+    summary?: string
+    actionsRequired?: string[]
   }[]
   suggestions: string[]
   scriptName: string
