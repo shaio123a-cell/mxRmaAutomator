@@ -1,21 +1,18 @@
 
 import React, { useEffect, useState } from 'react'
-import { Paper, Stack, Typography, Tabs, Tab, Box, IconButton, Tooltip, Snackbar, Alert } from '@mui/material'
-import { useAppDispatch, useAppSelector } from '../store/store'
-import { parseFBCSKM } from '../store/fbcskmSlice'
+import { Paper, Stack, Typography, Tabs, Tab, Box, IconButton, Tooltip, Snackbar, Alert, useTheme } from '@mui/material'
+import { useAppSelector } from '../store/store'
 import { serializeDevices, serializeDevicesWithComments } from '../services/serializer'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 
 export default function Viewer({ raw, onRawChange }: { raw: string, onRawChange: (t: string) => void }){
-  const dispatch = useAppDispatch()
+  const theme = useTheme()
   const devices = useAppSelector(s => s.fbcskm.devices)
   const originalLines = useAppSelector(s => s.fbcskm.originalLines)
 
   // track whether the raw textarea was edited/pasted manually and not saved
   const [rawEdited, setRawEdited] = useState(false)
   const dirty = useAppSelector(s => s.fbcskm.dirty)
-
-  useEffect(() => { if (raw && raw.trim().length>0) dispatch(parseFBCSKM(raw)) }, [raw])
 
   // when a save occurs, clear the pasted/manual-edited indicator
   useEffect(() => { if (!dirty) setRawEdited(false) }, [dirty])
@@ -66,13 +63,13 @@ export default function Viewer({ raw, onRawChange }: { raw: string, onRawChange:
 
         {tab === 0 ? (
           <>
-            <textarea style={{width:'100%', minHeight: 120}} value={raw} onChange={e=>{ onRawChange(e.target.value); setRawEdited(true) }} />
+            <textarea style={{ width: '100%', minHeight: 120, background: theme.palette.background.paper, color: theme.palette.text.primary, border: `1px solid ${theme.palette.divider}`, borderRadius: 4, padding: 8, fontFamily: 'monospace' }} value={raw} onChange={e=>{ onRawChange(e.target.value); setRawEdited(true) }} />
             {rawEdited && (
               <Typography color='warning.main' sx={{mt:1}}>Unsaved configuration — this was pasted/manually edited. After editing, copy from the "Preview Configuration" tab or save to a file.</Typography>
             )}
           </>
         ) : (
-          <textarea readOnly style={{width:'100%', minHeight: 120, background: '#f7f7f7'}} value={preview} />
+          <textarea readOnly style={{ width: '100%', minHeight: 120, background: theme.palette.action.hover, color: theme.palette.text.primary, border: `1px solid ${theme.palette.divider}`, borderRadius: 4, padding: 8, fontFamily: 'monospace' }} value={preview} />
         )}
       </Stack>
       <Snackbar open={copiedOpen} autoHideDuration={2000} onClose={()=>setCopiedOpen(false)} anchorOrigin={{vertical:'bottom', horizontal:'center'}}>

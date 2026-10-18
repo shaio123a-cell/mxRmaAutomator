@@ -1,8 +1,9 @@
 import configData from '../config.json'
+import type { ThemePreference } from './theme'
 
 export interface FieldConfig {
   name: string
-  type: 'text' | 'textarea' | 'number' | 'password' | 'select'
+  type: 'text' | 'textarea' | 'number' | 'password' | 'select' | 'checkbox' | 'time'
   label: string
   options?: string[]
 }
@@ -49,6 +50,9 @@ export interface Config {
   scriptStructure: ScriptStructure
   scriptUI: ScriptUI
   ai: AIConfig
+  ui?: {
+    defaultTheme?: ThemePreference
+  }
 }
 
 const config: Config = configData as Config

@@ -18,6 +18,7 @@ import {
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   Accordion,
   AccordionDetails,
@@ -29,6 +30,8 @@ import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import AddIcon from '@mui/icons-material/Add'
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
+import AutorenewIcon from '@mui/icons-material/Autorenew'
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 import SearchIcon from '@mui/icons-material/Search'
 import CodeEditor from 'react-simple-code-editor'
@@ -38,7 +41,7 @@ import 'prismjs/components/prism-powershell'
 import 'prismjs/themes/prism-tomorrow.css'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import { addAgenticScript, addScript, setAiModels } from '../store/fbcskmSlice'
-import { AiGenerationError, getActiveSystemPrompt, generateScriptFromPrompt, type AiGeneratedScript, type AiModelConfig, type AiSystemPrompt } from '../services/aiService'
+import { AiGenerationError, getActiveSystemPrompt, generateMoreSuggestions, generateScriptFromPrompt, type AiGeneratedScript, type AiModelConfig, type AiSystemPrompt } from '../services/aiService'
 import { deleteAgenticChat, listAgenticChats, loadAgenticChat, saveAgenticChat } from '../services/chatStorage'
 import type { AgenticChatMessage, AgenticChatRecord } from '../utils/fileApi'
 
@@ -82,11 +85,13 @@ export default function AgenticScriptPanel({
   prompts,
   activePromptId,
   onAddToConfig,
+  defaultDeviceId,
 }: {
   models: AiModelConfig[]
   prompts: AiSystemPrompt[]
   activePromptId: string | null
   onAddToConfig?: (deviceId: string, scriptId: string) => void
+  defaultDeviceId?: string | null
 }) {
   const dispatch = useAppDispatch()
   const devices = useAppSelector(state => state.fbcskm.devices)
@@ -95,12 +100,16 @@ export default function AgenticScriptPanel({
   const [generatedScript, setGeneratedScript] = useState<AiGeneratedScript | null>(null)
   const [generatedScripts, setGeneratedScripts] = useState<AiGeneratedScript[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [statusText, setStatusText] = useState('Describe the script you want to create.')
   const [showTestOutput, setShowTestOutput] = useState(false)
   const [testOutput, setTestOutput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [targetDeviceId, setTargetDeviceId] = useState('')
+  // Explicit selection wins; otherwise fall back to the device currently
+  // selected in the editor, then the first device.
+  const effectiveTargetDeviceId = targetDeviceId || defaultDeviceId || devices[0]?.id || ''
   const [savedPath, setSavedPath] = useState<string | null>(null)
   const [chatList, setChatList] = useState<AgenticChatRecord[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
@@ -117,6 +126,7 @@ export default function AgenticScriptPanel({
   const chatListRef = useRef(chatList)
   const latestChatRecordRef = useRef<AgenticChatRecord | null>(null)
   const saveTimerRef = useRef<number | null>(null)
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
 
   const systemPrompt = useMemo(
     () => getActiveSystemPrompt(prompts, activePromptId),
@@ -391,6 +401,38 @@ export default function AgenticScriptPanel({
       setStatusText(message)
     } finally {
       setIsGenerating(false)
+      window.requestAnimationFrame(() => {
+        const active = document.activeElement
+        if (!active || active === document.body) promptInputRef.current?.focus()
+      })
+    }
+  }
+
+  const fetchMoreSuggestions = async (mode: 'append' | 'replace') => {
+    if (isLoadingSuggestions || !generatedScript) return
+    const seedPrompt = generatedScript.prompt
+      || [...messages].reverse().find(message => message.role === 'user')?.content
+      || ''
+    setIsLoadingSuggestions(true)
+    try {
+      const fresh = await generateMoreSuggestions(
+        seedPrompt,
+        generatedScript.content,
+        mode === 'append' ? suggestions : [],
+        models,
+        systemPrompt,
+        3,
+      )
+      if (fresh.length) {
+        setSuggestions(current => (mode === 'append' ? [...current, ...fresh] : fresh))
+        setStatusText(mode === 'append' ? 'Added more suggested prompts.' : 'Refreshed suggested prompts.')
+      } else {
+        setStatusText('No additional suggestions were returned.')
+      }
+    } catch {
+      setStatusText('Unable to load additional suggestions.')
+    } finally {
+      setIsLoadingSuggestions(false)
     }
   }
 
@@ -439,7 +481,7 @@ export default function AgenticScriptPanel({
 
   const addToConfiguration = async () => {
     if (!generatedScript) return
-    const deviceId = targetDeviceId || devices[0]?.id
+    const deviceId = effectiveTargetDeviceId
     const device = devices.find(item => item.id === deviceId)
     if (!device) {
       setStatusText('Add a device in the main app before configuring this script.')
@@ -514,8 +556,8 @@ export default function AgenticScriptPanel({
   const enabledModelCount = models.filter(model => model.enabled).length
 
   return (
-    <Paper sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, minHeight: 'min(780px, calc(100vh - 140px))', overflow: 'hidden', background: '#ffffff', color: '#0f172a', border: '1px solid rgba(148,163,184,0.28)', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.07)' }}>
-      <Box component='aside' sx={{ width: { xs: '100%', md: 290 }, flexShrink: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#f7f9fb', borderRight: { xs: 0, md: '1px solid #e2e8f0' }, borderBottom: { xs: '1px solid #e2e8f0', md: 0 }, maxHeight: { xs: 300, md: 'none' } }}>
+    <Paper sx={theme => ({ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, minHeight: 'min(780px, calc(100vh - 140px))', overflow: 'hidden', backgroundColor: 'background.paper', color: 'text.primary', border: '1px solid', borderColor: 'divider', boxShadow: theme.shadows[2] })}>
+      <Box component='aside' sx={theme => ({ width: { xs: '100%', md: 290 }, flexShrink: 0, display: 'flex', flexDirection: 'column', backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#f7f9fb', borderRight: { xs: 0, md: '1px solid' }, borderBottom: { xs: '1px solid', md: 0 }, borderColor: 'divider', maxHeight: { xs: 300, md: 'none' } })}>
         <Box sx={{ p: 1.5, pb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
             <Typography variant='subtitle1' sx={{ fontWeight: 700 }}>Chats</Typography>
@@ -548,7 +590,7 @@ export default function AgenticScriptPanel({
                     className='agentic-chat-row'
                     selected={chat.id === activeChatId}
                     onClick={() => void continueChat(chat.id)}
-                    sx={{ minHeight: 38, py: 0.25, pl: 1.25, pr: 0.5, borderRadius: 1, '&.Mui-selected': { backgroundColor: '#e5edf5' }, '&.Mui-selected:hover': { backgroundColor: '#dce7f1' } }}
+                    sx={theme => ({ minHeight: 38, py: 0.25, pl: 1.25, pr: 0.5, borderRadius: 1, '&.Mui-selected': { backgroundColor: theme.palette.mode === 'dark' ? 'rgba(91,143,212,0.24)' : '#e5edf5' }, '&.Mui-selected:hover': { backgroundColor: theme.palette.mode === 'dark' ? 'rgba(91,143,212,0.32)' : '#dce7f1' } })}
                   >
                     <ListItemText primary={chat.title || 'Untitled chat'} primaryTypographyProps={{ noWrap: true, variant: 'body2', fontWeight: chat.id === activeChatId ? 600 : 400 }} />
                     <IconButton
@@ -591,7 +633,7 @@ export default function AgenticScriptPanel({
         {messages.length > 0 && (
           <Box aria-live='polite' sx={{ display: 'grid', gap: 1, maxHeight: 240, overflowY: 'auto' }}>
             {messages.map((message, index) => (
-              <Box key={`${index}-${message.role}`} sx={{ justifySelf: message.role === 'user' ? 'end' : 'start', maxWidth: 'min(90%, 800px)', px: 1.5, py: 1, borderRadius: 1, backgroundColor: message.role === 'user' ? '#e7f0fb' : '#f4f6f8' }}>
+              <Box key={`${index}-${message.role}`} sx={theme => ({ justifySelf: message.role === 'user' ? 'end' : 'start', maxWidth: 'min(90%, 800px)', px: 1.5, py: 1, borderRadius: 1, backgroundColor: message.role === 'user' ? (theme.palette.mode === 'dark' ? 'rgba(91,143,212,0.2)' : '#e7f0fb') : (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : '#f4f6f8') })}>
                 <Typography variant='caption' color='text.secondary'>{message.role === 'user' ? 'You' : 'Assistant'}</Typography>
                 <Typography sx={{ whiteSpace: 'pre-wrap' }}>{message.content}</Typography>
               </Box>
@@ -603,7 +645,7 @@ export default function AgenticScriptPanel({
           <TextField
             label='Describe the script or next change'
             value={prompt}
-            disabled={isGenerating || isHistoryLoading}
+            inputRef={promptInputRef}
             onChange={event => setPrompt(event.target.value)}
             onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -615,7 +657,7 @@ export default function AgenticScriptPanel({
             minRows={3}
             maxRows={10}
             fullWidth
-            sx={{ '& .MuiOutlinedInput-root': { backgroundColor: '#f8fafc', color: '#0f172a' } }}
+            sx={{ '& .MuiOutlinedInput-root': { backgroundColor: 'action.hover' } }}
           />
           <IconButton
             aria-label='Send prompt'
@@ -629,12 +671,41 @@ export default function AgenticScriptPanel({
           </IconButton>
         </Box>
 
-        {suggestions.length > 0 && <Box>
-          <Typography variant='caption' color='text.secondary' sx={{ display: 'block', mb: 1 }}>Suggested next prompts</Typography>
+        {(suggestions.length > 0 || Boolean(generatedScript)) && <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+            <Typography variant='caption' color='text.secondary' sx={{ flex: 1 }}>Suggested next prompts</Typography>
+            <Tooltip title='Show more suggestions'>
+              <span>
+                <IconButton
+                  size='small'
+                  aria-label='Show more suggestions'
+                  disabled={isLoadingSuggestions || !generatedScript}
+                  onClick={() => void fetchMoreSuggestions('append')}
+                >
+                  {isLoadingSuggestions ? <CircularProgress size={16} /> : <AddCircleOutlineIcon fontSize='small' />}
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title='Refresh suggestions'>
+              <span>
+                <IconButton
+                  size='small'
+                  aria-label='Refresh suggestions'
+                  disabled={isLoadingSuggestions || !generatedScript}
+                  onClick={() => void fetchMoreSuggestions('replace')}
+                >
+                  <AutorenewIcon fontSize='small' />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {suggestions.map((suggestion, index) => (
-              <Chip key={suggestion} label={suggestion} variant='outlined' onClick={() => setPrompt(suggestion)} sx={{ borderColor: '#cbd5e1', color: '#0f172a', background: '#f8fafc' }} />
+              <Chip key={`${index}-${suggestion}`} label={suggestion} variant='outlined' onClick={() => setPrompt(suggestion)} sx={{ backgroundColor: 'action.hover' }} />
             ))}
+            {suggestions.length === 0 && (
+              <Typography variant='caption' color='text.secondary'>No suggestions yet — use the buttons to generate some.</Typography>
+            )}
           </Box>
         </Box>}
 
@@ -646,7 +717,7 @@ export default function AgenticScriptPanel({
       void testScript()
       setShowTestOutput(true)
     }} disabled={!generatedScript} startIcon={<PlayArrowIcon />}>Test Run</Button>
-          <TextField select size='small' label='Target device' value={targetDeviceId || devices[0]?.id || ''} onChange={event => setTargetDeviceId(event.target.value)} sx={{ minWidth: 200 }}>
+          <TextField select size='small' label='Target device' value={effectiveTargetDeviceId} onChange={event => setTargetDeviceId(event.target.value)} sx={{ minWidth: 200 }}>
             {devices.map(device => <MenuItem key={device.id} value={device.id}>{device.name}</MenuItem>)}
           </TextField>
           <Button variant='contained' color='primary' onClick={() => void addToConfiguration()} disabled={!generatedScript || devices.length === 0}>Configure to Device</Button>
@@ -664,22 +735,22 @@ export default function AgenticScriptPanel({
               expandIcon={<ExpandMoreIcon />}
               aria-controls="panel1a-content"
               id="panel1a-header"
-              sx={{
-                backgroundColor: '#f8fafc',
-                color: '#1d4ed8',
-                '& .Mui-expanded': { 
-                  backgroundColor: '#f0f9ff', 
-                  color: '#1d4ed8' 
+              sx={theme => ({
+                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : '#f8fafc',
+                color: 'primary.main',
+                '& .Mui-expanded': {
+                  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(91,143,212,0.16)' : '#f0f9ff',
+                  color: 'primary.main'
                 },
                 minHeight: 48,
-                '&:hover': { backgroundColor: '#f0f9ff' }
-              }}
+                '&:hover': { backgroundColor: theme.palette.mode === 'dark' ? 'rgba(91,143,212,0.12)' : '#f0f9ff' }
+              })}
             >
               <Typography variant='subtitle2' sx={{ flex: 1 }}>Test Run Output</Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ px: 3, py: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography variant='subtitle2' color='#1d4ed8'>Test Run Output</Typography>
+                <Typography variant='subtitle2' color='primary.main'>Test Run Output</Typography>
                 <IconButton
                   aria-label='Close test output'
                   sx={{ padding: 0, margin: -4 }}
@@ -692,14 +763,7 @@ export default function AgenticScriptPanel({
                 </IconButton>
               </Box>
               {testOutput ? (
-                <pre style={{ 
-                  margin: 0, 
-                  whiteSpace: 'pre-wrap', 
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', 
-                  fontSize: 13, 
-                  color: '#0f172a', 
-                  lineHeight: 1.6 
-                }}>{testOutput}</pre>
+                <Box component='pre' sx={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, color: 'text.primary', lineHeight: 1.6 }}>{testOutput}</Box>
               ) : (
                 <Typography variant='body2' color='text.secondary' sx={{ p: 1 }}>Running test…</Typography>
               )}

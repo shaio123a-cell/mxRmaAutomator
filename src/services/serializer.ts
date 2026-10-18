@@ -116,7 +116,7 @@ export function serializeDevicesWithComments(devices: Device[], originalLines?: 
 
   const out: string[] = []
   const deviceByIndex = new Map<number, Device>()
-  const appended: string[] = []
+  const appended: Device[] = []
 
   for (const d of devices) {
     const idx = (d as any).originalLineIndex as number | undefined

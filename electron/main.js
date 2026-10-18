@@ -113,11 +113,21 @@ app.on('activate', () => {
 });
 
 // IPC handlers
+function refocusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  if (mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.focus();
+  }
+}
+
 ipcMain.handle('open-file', async (event, filter) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: filter ? [filter] : [{ name: 'Text Files', extensions: ['txt', 'cfg', 'config'] }],
   });
+  refocusMainWindow();
   return result.canceled ? null : result.filePaths[0];
 });
 
@@ -130,6 +140,7 @@ ipcMain.handle('save-file', async (event, suggestedName) => {
       { name: 'All Files', extensions: ['*'] },
     ],
   });
+  refocusMainWindow();
   return result.canceled ? null : result.filePath;
 });
 
@@ -301,6 +312,7 @@ ipcMain.handle('select-path', async (event, options) => {
     properties: properties,
     filters: options?.filters || []
   })
+  refocusMainWindow();
   return result.canceled ? null : result.filePaths[0];
 })
 

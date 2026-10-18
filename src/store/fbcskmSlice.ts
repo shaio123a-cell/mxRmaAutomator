@@ -2,6 +2,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { v4 as uuid } from 'uuid'
 import config, { type AIModelConfig, type AISystemPrompt } from '../config'
+import type { ThemePreference } from '../theme'
 
 export interface RestMonArgs {
   url?: string
@@ -79,6 +80,7 @@ export interface FBCSKMState {
   systemPrompts: AISystemPrompt[]
   activeSystemPromptId: string | null
   agenticScripts: AgenticScriptDraft[]
+  themePreference: ThemePreference
 }
 
 const initialState: FBCSKMState = {
@@ -104,7 +106,8 @@ const initialState: FBCSKMState = {
   aiModels: config.ai?.models ?? [],
   systemPrompts: config.ai?.systemPrompts ?? [],
   activeSystemPromptId: config.ai?.activeSystemPromptId ?? null,
-  agenticScripts: []
+  agenticScripts: [],
+  themePreference: config.ui?.defaultTheme ?? 'system'
 }
 
 /**
@@ -543,6 +546,9 @@ const slice = createSlice({
     setActiveSystemPromptId(state, action: PayloadAction<string | null>) {
       state.activeSystemPromptId = action.payload
     },
+    setThemePreference(state, action: PayloadAction<ThemePreference>) {
+      state.themePreference = action.payload
+    },
     addAgenticScript(state, action: PayloadAction<AgenticScriptDraft>) {
       state.agenticScripts.unshift(action.payload)
     },
@@ -586,6 +592,7 @@ export const {
   upsertSystemPrompt,
   deleteSystemPrompt,
   setActiveSystemPromptId,
+  setThemePreference,
   addAgenticScript,
   deleteAgenticScript,
   reorderDevices,

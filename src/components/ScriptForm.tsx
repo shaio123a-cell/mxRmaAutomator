@@ -1,13 +1,19 @@
 
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
-import { Box, Button, Grid, MenuItem, Stack, TextField, Typography, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Checkbox, FormControlLabel, Tooltip } from '@mui/material'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Checkbox, Divider, Drawer, FormControlLabel, Grid, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import CloseIcon from '@mui/icons-material/Close'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import LockIcon from '@mui/icons-material/Lock'
+import ScienceIcon from '@mui/icons-material/Science'
+import SaveIcon from '@mui/icons-material/Save'
 import { Device, ScriptInstance, updateScript } from '../store/fbcskmSlice'
 import { useAppDispatch } from '../store/store'
-import config from '../config'
+import config, { FieldConfig } from '../config'
 import { TimePicker } from '@mui/x-date-pickers'
 import dayjs from 'dayjs'
+import DryRunResultsDialog, { DryRunResults } from './DryRunResultsDialog'
+import { buildDryRunCommands, buildEncodedArgs } from '../utils/scriptArgs'
 
 export type ScriptFormHandle = {
   isDirty: () => boolean
@@ -15,50 +21,85 @@ export type ScriptFormHandle = {
   discard: () => void
 }
 
-export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInstance, onChange: (s: ScriptInstance) => void }>(
-  function ScriptForm({ device, script, onChange }, ref) {
+interface Props {
+  open: boolean
+  device: Device
+  script: ScriptInstance
+  onChange: (s: ScriptInstance) => void
+  onClose: () => void
+}
+
+const SECTION_FIELDS: Record<string, string[]> = {
+  request: ['url', 'method', 'outputFormat', 'payload', 'headers', 'matchRegex', 'args', 'searchKey', 'searchString'],
+  auth: ['username', 'password', 'decryptPass'],
+  monitoring: ['pollIntervalSec', 'timeoutSec', 'regexField', 'ScriptIndependentMonitorView'],
+}
+
+function sectionForField(name: string): string {
+  for (const [section, names] of Object.entries(SECTION_FIELDS)) {
+    if (names.includes(name)) return section
+  }
+  return 'request'
+}
+
+const ACCORDION_STORAGE_KEY = 'mx-rma-script-editor-accordions'
+type AccordionState = Record<string, boolean>
+const DEFAULT_ACCORDION_STATE: AccordionState = {
+  identity: true,
+  request: true,
+  auth: false,
+  monitoring: false,
+  scheduling: false,
+  output: false,
+}
+
+function readAccordionState(): AccordionState {
+  try {
+    const raw = localStorage.getItem(ACCORDION_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') return { ...DEFAULT_ACCORDION_STATE, ...parsed }
+    }
+  } catch { /* ignore malformed/unavailable storage */ }
+  return DEFAULT_ACCORDION_STATE
+}
+
+export default forwardRef<ScriptFormHandle, Props>(
+  function ScriptForm({ open, device, script, onChange, onClose }, ref) {
     const dispatch = useAppDispatch()
     const [draft, setDraft] = useState<ScriptInstance>(script)
     const [dryRunOpen, setDryRunOpen] = useState(false)
-    const [dryRunResults, setDryRunResults] = useState<{ command: string, originalCommand: string, results: string } | null>(null)
-
-
+    const [dryRunResults, setDryRunResults] = useState<DryRunResults | null>(null)
 
     const [headersError, setHeadersError] = useState(false)
     const [payloadError, setPayloadError] = useState(false)
     const [scriptNameError, setScriptNameError] = useState(false)
 
+    // Per-browser accordion expand/collapse preferences, restored on every open.
+    const [expandedSections, setExpandedSections] = useState<AccordionState>(readAccordionState)
+    useEffect(() => {
+      try { localStorage.setItem(ACCORDION_STORAGE_KEY, JSON.stringify(expandedSections)) } catch { /* ignore */ }
+    }, [expandedSections])
+    const toggleSection = (id: string) => (_event: React.SyntheticEvent, isExpanded: boolean) =>
+      setExpandedSections(prev => ({ ...prev, [id]: isExpanded }))
+
     const validateScriptName = (value: string) => !/[!@#$%^&*|]/.test(value)
-
     const validateHeaders = (value: string) => !value || (value.trim().startsWith('@{') && value.trim().endsWith('}'))
-
     const validatePayload = (value: string, format: string) => {
       if (!value.trim()) return true
       if (format === 'json') {
-        try {
-          JSON.parse(value)
-          return true
-        } catch {
-          return false
-        }
+        try { JSON.parse(value); return true } catch { return false }
       } else if (format === 'xml') {
         try {
           const parser = new DOMParser()
           const doc = parser.parseFromString(value, 'text/xml')
           return !doc.querySelector('parsererror')
-        } catch {
-          return false
-        }
-      } else if (format === 'text') {
-        return true
+        } catch { return false }
       }
       return true
     }
 
-    // Keep local draft in sync when the parent selects a different script
-    useEffect(() => {
-      setDraft(script)
-    }, [script])
+    useEffect(() => { setDraft(script) }, [script])
 
     useEffect(() => {
       if (draft.isRestmon) {
@@ -66,9 +107,7 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
       }
     }, [draft.args.outputFormat, draft.args.payload])
 
-    useEffect(() => {
-      setScriptNameError(!validateScriptName(draft.instanceName || ''))
-    }, [draft.instanceName])
+    useEffect(() => { setScriptNameError(!validateScriptName(draft.instanceName || '')) }, [draft.instanceName])
 
     useImperativeHandle(ref, () => ({
       isDirty: () => JSON.stringify(draft) !== JSON.stringify(script),
@@ -100,33 +139,15 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
       })
     }
 
-    const encodedPreview = (() => {
-      // Use single quotes for wrapping, escape single quotes as '' (PowerShell standard)
-      const escapeArg = (s: string) => s.replace(/'/g, "''")
-      const encodeSpecials = (s: string): string => s.replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>')
-      if (!draft.isRestmon) return encodeSpecials(draft.args || '')
-      if (typeof draft.args !== 'object' || !draft.args) return ' '
-      const parts: string[] = []
-      const a = draft.args
-      if (a.url) parts.push(`-url ${a.url}`)
-      if (a.method) parts.push(`-method ${a.method}`)
-      if (a.outputFormat) parts.push(`-outputFormat ${a.outputFormat}`)
-      if (a.payload) parts.push(`-payload '${escapeArg(a.payload)}'`)
-      if (a.searchKey) parts.push(`-searchKey '${escapeArg(a.searchKey)}'`)
-      if (a.searchString) parts.push(`-searchString '${escapeArg(a.searchString)}'`)
-      if (a.matchRegex) parts.push(`-matchRegex '${escapeArg(a.matchRegex)}'`)
-      if (a.username) parts.push(`-username '${escapeArg(a.username)}'`)
-      if (a.password) parts.push(`-password '${escapeArg(a.password)}'`)
-      // headers: passed raw without quotes or escaping, as requested
-      if (a.headers) parts.push(`-headers ${a.headers}`)
-      if (a.decryptPass) parts.push(`-decryptPass ${a.decryptPass}`)
-      let cmd = ' ' + parts.join(' ') + ' '
-      cmd = cmd.replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>')
-      return cmd
-    })()
+    const encodedPreview = buildEncodedArgs(draft)
 
     const fieldOrder = draft.isRestmon ? config.scriptUI.restmonOrder : config.scriptUI.genericOrder
     const fieldsToShow = fieldOrder.map(name => config.scriptUI.allFields.find(f => f.name === name)).filter(Boolean) as FieldConfig[]
+
+    const isSchedulingField = (name: string) =>
+      name.startsWith('scriptSunday') || name.startsWith('scriptMonday') || name.startsWith('scriptTueday') ||
+      name.startsWith('scriptWednesday') || name.startsWith('scriptThursday') || name.startsWith('scriptFriday') ||
+      name.startsWith('scriptSaturday') || name === 'scriptStartTime' || name === 'scriptEndTime'
 
     const getValue = (fieldName: string) => {
       const field = config.scriptUI.allFields.find(f => f.name === fieldName)
@@ -162,370 +183,371 @@ export default forwardRef<ScriptFormHandle, { device: Device, script: ScriptInst
       onChange(draft)
     }
 
-    return (
-      <Stack spacing={2}>
-        <Typography variant='h6'>Edit Script</Typography>
-        <FormControlLabel control={<Checkbox checked={draft.isRestmon ?? false} onChange={e => setDraft(prev => {
-          const next = { ...prev, isRestmon: e.target.checked }
-          if (next.isRestmon) {
-            if (typeof next.args !== 'object') next.args = {}
-          } else {
-            if (typeof next.args === 'object') next.args = ''
-          }
-          return next
-        })} />} label="Is Restmon Script" />
-        <Grid container spacing={2}>
-          {fieldsToShow.map(field => {
-            const value = getValue(field.name)
-            const isSelect = field.type === 'select'
-            const isTextarea = field.type === 'textarea'
-            const isPassword = field.type === 'password'
-            const isNumber = field.type === 'number'
+    const runDryRun = async () => {
+      const { originalCommand, command } = buildDryRunCommands(draft)
+      let results = ''
+      if (window.electronAPI?.runCommand) {
+        try {
+          const res = await window.electronAPI.runCommand(command)
+          results = res.error ? `Error: ${res.error}\nStdout: ${res.stdout}\nStderr: ${res.stderr}` : `Stdout: ${res.stdout}\nStderr: ${res.stderr}`
+        } catch (e) {
+          results = `Failed to run: ${e}`
+        }
+      } else {
+        results = 'Dry run is only available in the Electron app.'
+      }
+      setDryRunResults({ command, originalCommand, results })
+      setDryRunOpen(true)
+    }
 
-            if (field.name === 'headers') {
-              return (
-                <Grid item xs={12} key={field.name}>
-                  <Tooltip title='Example: @{"Content-Type" = "application/json"; "Authorization" = "token"}'>
-                    <TextField
-                      label={field.label}
-                      fullWidth
-                      value={value}
-                      onChange={e => { set(field.name, e.target.value); setHeadersError(!validateHeaders(e.target.value)) }}
-                      error={headersError}
-                      helperText={headersError ? 'Invalid format. Must be a PowerShell hashtable like @{"key"="value"}' : ''}
-                    />
-                  </Tooltip>
-                </Grid>
-              )
-            }
+    const encryptPass = async () => {
+      const pw = getValue('password')
+      if (!pw) { alert('Enter a password to encrypt'); return }
+      try {
+        const pwBytes = new Uint8Array(pw.length * 2)
+        for (let i = 0; i < pw.length; i++) {
+          const code = pw.charCodeAt(i)
+          pwBytes[i * 2] = code & 0xFF
+          pwBytes[i * 2 + 1] = code >> 8
+        }
+        const keyBytes = new Uint8Array(32)
+        for (let i = 0; i < 32; i++) keyBytes[i] = i + 1
+        const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, ['encrypt'])
+        const iv = crypto.getRandomValues(new Uint8Array(16))
+        const ctBuf = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, key, pwBytes)
+        const ct = new Uint8Array(ctBuf)
+        const HEADER = '76492d1116743f0423413b16050a5345'
+        const ivB64 = btoa(String.fromCharCode(...iv))
+        const cipherHex = Array.from(ct).map(b => b.toString(16).padStart(2, '0')).join('')
+        const pkg = `2|${ivB64}|${cipherHex}`
+        const pkgUtf16 = new Uint8Array(pkg.length * 2)
+        for (let i = 0; i < pkg.length; i++) {
+          const code = pkg.charCodeAt(i)
+          pkgUtf16[i * 2] = code & 0xFF
+          pkgUtf16[i * 2 + 1] = code >> 8
+        }
+        let b64Input = ''
+        for (let i = 0; i < pkgUtf16.length; i++) b64Input += String.fromCharCode(pkgUtf16[i])
+        const encoded = btoa(b64Input)
+        set('password', HEADER + encoded)
+        set('decryptPass', 'TRUE')
+      } catch (e) {
+        console.error('Encryption failed', e)
+      }
+    }
 
-            if (field.name === 'payload') {
-              return (
-                <Grid item xs={12} key={field.name}>
-                  <TextField
-                    label={field.label}
-                    fullWidth
-                    value={value}
-                    onChange={e => { set(field.name, e.target.value); setPayloadError(!validatePayload(e.target.value, draft.args.outputFormat || 'json')) }}
-                    error={payloadError}
-                    helperText={payloadError ? `Invalid ${draft.args.outputFormat || 'json'} format` : ''}
-                  />
-                </Grid>
-              )
-            }
+    const renderField = (field: FieldConfig) => {
+      const value = getValue(field.name)
+      const isSelect = field.type === 'select'
+      const isTextarea = field.type === 'textarea'
+      const isPassword = field.type === 'password'
+      const isNumber = field.type === 'number'
 
-            if (field.name === 'password') {
-              return (
-                <Grid item xs={12} md={6} key={field.name}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <TextField
-                      label={field.label}
-                      type={isPassword ? 'password' : 'text'}
-                      fullWidth
-                      value={value}
-                      onChange={e => set(field.name, e.target.value)}
-                    />
-                    <Button size='small' variant='outlined'
-                      onClick={async () => {
-                        const pw = value;
-                        if (!pw) { alert('Enter a password to encrypt'); return; }
+      if (field.name === 'headers') {
+        return (
+          <Grid item xs={12} key={field.name}>
+            <Tooltip title='Example: @{"Content-Type" = "application/json"; "Authorization" = "token"}'>
+              <TextField
+                label={field.label}
+                fullWidth
+                size='small'
+                value={value}
+                onChange={e => { set(field.name, e.target.value); setHeadersError(!validateHeaders(e.target.value)) }}
+                error={headersError}
+                helperText={headersError ? 'Invalid format. Must be a PowerShell hashtable like @{"key"="value"}' : ''}
+              />
+            </Tooltip>
+          </Grid>
+        )
+      }
 
-                        try {
-                          // 1) UTF‑16LE bytes of the password (NO null terminator)
-                          const pwBytes = new Uint8Array(pw.length * 2);
-                          for (let i = 0; i < pw.length; i++) {
-                            const code = pw.charCodeAt(i);
-                            pwBytes[i * 2] = code & 0xFF;        // little-endian
-                            pwBytes[i * 2 + 1] = code >> 8;
-                          }
+      if (field.name === 'payload') {
+        return (
+          <Grid item xs={12} key={field.name}>
+            <TextField
+              label={field.label}
+              fullWidth
+              size='small'
+              value={value}
+              onChange={e => { set(field.name, e.target.value); setPayloadError(!validatePayload(e.target.value, draft.args.outputFormat || 'json')) }}
+              error={payloadError}
+              helperText={payloadError ? `Invalid ${draft.args.outputFormat || 'json'} format` : ''}
+            />
+          </Grid>
+        )
+      }
 
-                          // 2) 32-byte key = (1..32)
-                          const keyBytes = new Uint8Array(32);
-                          for (let i = 0; i < 32; i++) keyBytes[i] = i + 1;
-                          const key = await crypto.subtle.importKey(
-                            'raw', keyBytes, { name: 'AES-CBC' }, false, ['encrypt']
-                          );
+      if (field.name === 'password') {
+        return (
+          <Grid item xs={12} md={6} lg={4} key={field.name}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                label={field.label}
+                type={isPassword ? 'password' : 'text'}
+                fullWidth
+                size='small'
+                value={value}
+                onChange={e => set(field.name, e.target.value)}
+              />
+              <Tooltip title='Encrypt password (PowerShell SecureString)'>
+                <IconButton onClick={encryptPass} size='small' color='primary'>
+                  <LockIcon fontSize='small' />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Grid>
+        )
+      }
 
-                          // 3) Random 16-byte IV
-                          const iv = crypto.getRandomValues(new Uint8Array(16));
+      if (field.name === 'decryptPass') {
+        return (
+          <Grid item xs={12} md={6} lg={4} key={field.name}>
+            <TextField
+              label={field.label}
+              select
+              fullWidth
+              size='small'
+              value={value}
+              onChange={e => set(field.name, e.target.value)}
+            >
+              {field.options?.map(option => (
+                <MenuItem key={option} value={option}>{option}</MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+        )
+      }
 
-                          // 4) Encrypt (AES-CBC, PKCS#7 padding)
-                          const ctBuf = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, key, pwBytes);
-                          const ct = new Uint8Array(ctBuf);
+      if (isSchedulingField(field.name)) return null
 
-                          // 5) Build V2 package: HEADER + base64( UTF-16LE("2|<IV-b64>|<cipher-hex>") )
-                          const HEADER = '76492d1116743f0423413b16050a5345'; // SecureStringExportHeader
+      if (field.name === 'instanceName') {
+        return (
+          <Grid item xs={12} md={6} lg={4} key={field.name}>
+            <TextField
+              label={field.label}
+              fullWidth
+              size='small'
+              value={value}
+              onChange={e => { set(field.name, e.target.value); setScriptNameError(!validateScriptName(e.target.value)) }}
+              error={scriptNameError}
+              helperText={scriptNameError ? 'Script name must not contain these characters: !@#$%^&*|' : ''}
+            />
+          </Grid>
+        )
+      }
 
-                          // IV → Base64
-                          const ivB64 = btoa(String.fromCharCode(...iv));
+      if (field.type === 'checkbox') {
+        return (
+          <Grid item xs={12} md={4} key={field.name}>
+            <FormControlLabel
+              control={<Checkbox size='small' checked={!!value} onChange={e => set(field.name, e.target.checked)} />}
+              label={field.label}
+            />
+          </Grid>
+        )
+      }
 
-                          // Ciphertext → lowercase hex
-                          const cipherHex = Array.from(ct).map(b => b.toString(16).padStart(2, '0')).join('');
+      return (
+        <Grid item xs={12} md={
+          field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 :
+            field.name === 'pollIntervalSec' || field.name === 'timeoutSec' ? 6 :
+              6
+        } lg={
+          field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 : 4
+        } key={field.name}>
+          {field.name === 'scriptPath' ? (
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                label={field.label}
+                fullWidth
+                size='small'
+                value={value}
+                onChange={e => set(field.name, e.target.value)}
+              />
+              <Tooltip title='Browse for script file'>
+                <IconButton size='small' onClick={async () => {
+                  const path = await window.electronAPI.selectPath({ file: true });
+                  if (path) set(field.name, path);
+                }}>
+                  <FolderOpenIcon fontSize='small' />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          ) : (
+            <TextField
+              label={field.label}
+              type={isPassword ? 'password' : isNumber ? 'number' : field.type === 'time' ? 'time' : 'text'}
+              select={isSelect}
+              multiline={isTextarea}
+              minRows={isTextarea ? 3 : undefined}
+              fullWidth
+              size='small'
+              value={value}
+              onChange={e => set(field.name, e.target.value)}
+              InputLabelProps={field.type === 'time' ? { shrink: true } : undefined}
+            >
+              {isSelect && field.options?.map(option => (
+                <MenuItem key={option} value={option}>{option}</MenuItem>
+              ))}
+            </TextField>
+          )}
+        </Grid>
+      )
+    }
 
-                          // "2|<IV>|<HEX>"
-                          const pkg = `2|${ivB64}|${cipherHex}`;
+    const sectionFields = (names: string[]) =>
+      fieldsToShow.filter(f => names.includes(f.name)).map(renderField)
 
-                          // UTF‑16LE encode the package string
-                          const pkgUtf16 = new Uint8Array(pkg.length * 2);
-                          for (let i = 0; i < pkg.length; i++) {
-                            const code = pkg.charCodeAt(i);
-                            pkgUtf16[i * 2] = code & 0xFF;
-                            pkgUtf16[i * 2 + 1] = code >> 8;
-                          }
-
-                          // Base64 encode UTF‑16LE bytes
-                          let b64Input = '';
-                          for (let i = 0; i < pkgUtf16.length; i++) b64Input += String.fromCharCode(pkgUtf16[i]);
-                          const encoded = btoa(b64Input);
-
-                          const finalString = HEADER + encoded;
-
-                          set('password', finalString);
-                          set('decryptPass', 'TRUE');
-                        } catch (e) {
-                          console.error('Encryption failed', e);
-                        }
-                      }}>Encrypt Pass</Button>
-                  </div>
-                </Grid>
-              )
-            }
-
-            if (field.name === 'decryptPass') {
-              return (
-                <Grid item xs={12} md={6} key={field.name}>
-                  <TextField
-                    label={field.label}
-                    select
-                    fullWidth
-                    value={value}
-                    onChange={e => set(field.name, e.target.value)}
-                  >
-                    {field.options?.map(option => (
-                      <MenuItem key={option} value={option}>{option}</MenuItem>
-                    ))}
-                  </TextField>
-                </Grid>
-              )
-            }
-
-            const isSchedulingField = field.name.startsWith('scriptSunday') ||
-              field.name.startsWith('scriptMonday') ||
-              field.name.startsWith('scriptTueday') ||
-              field.name.startsWith('scriptWednesday') ||
-              field.name.startsWith('scriptThursday') ||
-              field.name.startsWith('scriptFriday') ||
-              field.name.startsWith('scriptSaturday') ||
-              field.name === 'scriptStartTime' ||
-              field.name === 'scriptEndTime';
-
-            if (isSchedulingField) return null;
-
-            if (field.name === 'instanceName') {
-              return (
-                <Grid item xs={12} md={6} key={field.name}>
-                  <TextField
-                    label={field.label}
-                    fullWidth
-                    value={value}
-                    onChange={e => { set(field.name, e.target.value); setScriptNameError(!validateScriptName(e.target.value)) }}
-                    error={scriptNameError}
-                    helperText={scriptNameError ? 'Script name must not contain these characters: !@#$%^&*|' : ''}
-                  />
-                </Grid>
-              )
-            }
-
-            if (field.type === 'checkbox') {
-              return (
-                <Grid item xs={12} md={4} key={field.name}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={!!value}
-                        onChange={e => set(field.name, e.target.checked)}
+    const schedulingSection = (
+      <Accordion expanded={expandedSections.scheduling} onChange={toggleSection('scheduling')} disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography fontWeight={600}>Scheduling</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Grid container spacing={2}>
+            {fieldsToShow.filter(f => f.name === 'scriptSchedulingEnable' || f.name === 'scriptScheduleDateRegex').map(renderField)}
+            <Grid item xs={12} md={6}>
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, height: '100%' }}>
+                <Typography variant='subtitle2' gutterBottom>Run Days</Typography>
+                <Stack>
+                  {['scriptSunday', 'scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday'].map(dayName => {
+                    const f = config.scriptUI.allFields.find(field => field.name === dayName);
+                    if (!f) return null;
+                    return (
+                      <FormControlLabel
+                        key={dayName}
+                        control={<Checkbox size='small' checked={!!getValue(dayName)} onChange={e => set(dayName, e.target.checked)} />}
+                        label={f.label}
+                        sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
                       />
-                    }
-                    label={field.label}
+                    );
+                  })}
+                </Stack>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, height: '100%' }}>
+                <Typography variant='subtitle2' gutterBottom>Operating Window</Typography>
+                <Stack spacing={2} sx={{ mt: 1 }}>
+                  <TimePicker
+                    label='Start Time'
+                    ampm={false}
+                    value={getValue('scriptStartTime') ? dayjs(getValue('scriptStartTime'), 'HH:mm') : null}
+                    onChange={(newValue) => set('scriptStartTime', newValue ? newValue.format('HH:mm') : '')}
+                    slotProps={{ textField: { fullWidth: true, size: 'small' } }}
                   />
-                </Grid>
-              )
-            }
-
-            return (
-              <Grid item xs={12} md={
-                field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 :
-                  field.name === 'pollIntervalSec' || field.name === 'timeoutSec' ? 3 :
-                    6
-              } key={field.name}>
-                {field.name === 'scriptPath' ? (
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <TextField
-                      label={field.label}
-                      fullWidth
-                      value={value}
-                      onChange={e => set(field.name, e.target.value)}
-                    />
-                    <IconButton onClick={async () => {
-                      const path = await window.electronAPI.selectPath({ file: true });
-                      if (path) set(field.name, path);
-                    }}>
-                      <FolderOpenIcon />
-                    </IconButton>
-                  </Box>
-                ) : (
-                  <TextField
-                    label={field.label}
-                    type={isPassword ? 'password' : isNumber ? 'number' : field.type === 'time' ? 'time' : 'text'}
-                    select={isSelect}
-                    multiline={isTextarea}
-                    minRows={isTextarea ? 3 : undefined}
-                    fullWidth
-                    value={value}
-                    onChange={e => set(field.name, e.target.value)}
-                    InputLabelProps={field.type === 'time' ? { shrink: true } : undefined}
-                  >
-                    {isSelect && field.options?.map(option => (
-                      <MenuItem key={option} value={option}>{option}</MenuItem>
-                    ))}
-                  </TextField>
-                )}
-              </Grid>
-            )
-          })}
-
-          <Grid item xs={12}>
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <Box sx={{ border: '1px solid #ccc', borderRadius: 1, p: 2, height: '100%' }}>
-                  <Typography variant="subtitle2" gutterBottom>Run Days</Typography>
-                  <Stack>
-                    {['scriptSunday', 'scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday'].map(dayName => {
-                      const f = config.scriptUI.allFields.find(field => field.name === dayName);
-                      if (!f) return null;
-                      return (
-                        <FormControlLabel
-                          key={dayName}
-                          control={
-                            <Checkbox
-                              size="small"
-                              checked={!!getValue(dayName)}
-                              onChange={e => set(dayName, e.target.checked)}
-                            />
-                          }
-                          label={f.label}
-                          sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                        />
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Box sx={{ border: '1px solid #ccc', borderRadius: 1, p: 2, height: '100%' }}>
-                  <Typography variant="subtitle2" gutterBottom>Operating Window</Typography>
-                  <Stack spacing={2} sx={{ mt: 1 }}>
-                    <TimePicker
-                      label="Start Time"
-                      ampm={false}
-                      value={getValue('scriptStartTime') ? dayjs(getValue('scriptStartTime'), 'HH:mm') : null}
-                      onChange={(newValue) => set('scriptStartTime', newValue ? newValue.format('HH:mm') : '')}
-                      slotProps={{ textField: { fullWidth: true } }}
-                    />
-                    <TimePicker
-                      label="End Time"
-                      ampm={false}
-                      value={getValue('scriptEndTime') ? dayjs(getValue('scriptEndTime'), 'HH:mm') : null}
-                      onChange={(newValue) => set('scriptEndTime', newValue ? newValue.format('HH:mm') : '')}
-                      slotProps={{ textField: { fullWidth: true } }}
-                    />
-                  </Stack>
-                </Box>
-              </Grid>
+                  <TimePicker
+                    label='End Time'
+                    ampm={false}
+                    value={getValue('scriptEndTime') ? dayjs(getValue('scriptEndTime'), 'HH:mm') : null}
+                    onChange={(newValue) => set('scriptEndTime', newValue ? newValue.format('HH:mm') : '')}
+                    slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+                  />
+                </Stack>
+              </Box>
             </Grid>
           </Grid>
+        </AccordionDetails>
+      </Accordion>
+    )
 
-          <Grid item xs={12}>
-            <TextField label={draft.isRestmon ? 'Encoded Command Preview' : 'Arguments Preview'} fullWidth multiline minRows={2} value={encodedPreview} InputProps={{ readOnly: true }} />
-          </Grid>
-        </Grid>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant='contained' sx={{ backgroundColor: 'white', color: 'black' }} onClick={async () => {
-            const isPs1 = draft.scriptPath.toLowerCase().endsWith('.ps1')
-            const pathQuoted = `"${draft.scriptPath}"`
-
-            // Simplify: use encodedPreview (which now uses single quotes) for both.
-            // Just revert the placeholder replacements for execution/display.
-            const argsBase = (draft.isRestmon ? ' ' + encodedPreview.replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*') : (' ' + (draft.args || '')))
-
-            const originalCmd = `${pathQuoted}${argsBase}`
-            const cmd = isPs1
-              ? `powershell.exe -ExecutionPolicy Bypass -Command "& '${draft.scriptPath}' ${argsBase.replace(/"/g, '\\"')}"`
-              : `${pathQuoted}${argsBase}`
-
-            let results = ''
-            if (window.electronAPI?.runCommand) {
-              try {
-                const res = await window.electronAPI.runCommand(cmd)
-                results = res.error ? `Error: ${res.error}\nStdout: ${res.stdout}\nStderr: ${res.stderr}` : `Stdout: ${res.stdout}\nStderr: ${res.stderr}`
-              } catch (e) {
-                results = `Failed to run: ${e}`
-              }
-            } else {
-              results = 'Dry run is only available in the Electron app.'
-            }
-            setDryRunResults({ command: cmd, originalCommand: originalCmd, results })
-            setDryRunOpen(true)
-          }}>Dry Run</Button>
-          <Button variant='contained' onClick={save}>Save Script</Button>
+    return (
+      <Drawer anchor='right' open={open} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', sm: 'min(1100px, 92vw)' }, display: 'flex', flexDirection: 'column' } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Box>
+            <Typography variant='h6'>Edit Script</Typography>
+            <Typography variant='body2' color='text.secondary'>{draft.instanceName}</Typography>
+          </Box>
+          <Tooltip title='Close'>
+            <IconButton onClick={onClose} aria-label='close editor'><CloseIcon /></IconButton>
+          </Tooltip>
         </Box>
 
-        <Dialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} maxWidth='md' fullWidth>
-          <DialogTitle>Dry Run Results</DialogTitle>
-          <DialogContent>
-            {dryRunResults && (
-              <>
-                <Box sx={{ position: 'relative', mb: 2 }}>
-                  <Typography variant='h6'>Original Command</Typography>
-                  <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.originalCommand)}>
-                    <ContentCopyIcon />
-                  </IconButton>
-                  <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4 }}>
-                    {dryRunResults.originalCommand}
-                  </pre>
-                </Box>
-                <Box sx={{ position: 'relative', mb: 2 }}>
-                  <Typography variant='h6'>Executed Command</Typography>
-                  <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.command)}>
-                    <ContentCopyIcon />
-                  </IconButton>
-                  <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4 }}>
-                    {dryRunResults.command}
-                  </pre>
-                </Box>
-                <Box sx={{ position: 'relative' }}>
-                  <Typography variant='h6'>Results</Typography>
-                  <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.results)}>
-                    <ContentCopyIcon />
-                  </IconButton>
-                  <Box sx={{ fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>
-                    {dryRunResults.results.split(/\r?\n/).map((line, i) => (
-                      <div key={i} style={{
-                        color: line.toLowerCase().includes('error') ? 'red' : line.toLowerCase().includes('warn') ? 'orange' : 'inherit',
-                        minHeight: '1.2em'
-                      }}>
-                        {line}
-                      </div>
-                    ))}
-                  </Box>
-                </Box>
-              </>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDryRunOpen(false)}>Close</Button>
-          </DialogActions>
-        </Dialog>
-      </Stack>
+        <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1 }}>
+          <FormControlLabel
+            control={<Checkbox size='small' checked={draft.isRestmon ?? false} onChange={e => setDraft(prev => {
+              const next = { ...prev, isRestmon: e.target.checked }
+              if (next.isRestmon) {
+                if (typeof next.args !== 'object') next.args = {}
+              } else {
+                if (typeof next.args === 'object') next.args = ''
+              }
+              return next
+            })} />}
+            label='Is Restmon Script'
+            sx={{ mb: 1 }}
+          />
+
+          <Accordion expanded={expandedSections.identity} onChange={toggleSection('identity')} disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight={600}>Identity</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Grid container spacing={2}>
+                {sectionFields(['instanceName', 'scriptPath'])}
+              </Grid>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion expanded={expandedSections.request} onChange={toggleSection('request')} disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight={600}>{draft.isRestmon ? 'Request' : 'Arguments'}</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Grid container spacing={2}>
+                {sectionFields(SECTION_FIELDS.request)}
+              </Grid>
+            </AccordionDetails>
+          </Accordion>
+
+          {draft.isRestmon && (
+            <Accordion expanded={expandedSections.auth} onChange={toggleSection('auth')} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography fontWeight={600}>Authentication</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  {sectionFields(SECTION_FIELDS.auth)}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+          )}
+
+          <Accordion expanded={expandedSections.monitoring} onChange={toggleSection('monitoring')} disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight={600}>Monitoring</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Grid container spacing={2}>
+                {sectionFields(SECTION_FIELDS.monitoring)}
+              </Grid>
+            </AccordionDetails>
+          </Accordion>
+
+          {schedulingSection}
+
+          <Accordion expanded={expandedSections.output} onChange={toggleSection('output')} disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight={600}>Output Preview</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <TextField
+                label={draft.isRestmon ? 'Encoded Command Preview' : 'Arguments Preview'}
+                fullWidth multiline minRows={2} size='small'
+                value={encodedPreview}
+                InputProps={{ readOnly: true }}
+              />
+            </AccordionDetails>
+          </Accordion>
+        </Box>
+
+        <Divider />
+        <Box sx={{ display: 'flex', gap: 1, p: 2, backgroundColor: 'background.paper' }}>
+          <Button variant='outlined' startIcon={<ScienceIcon />} onClick={runDryRun}>Dry Run</Button>
+          <Button variant='contained' startIcon={<SaveIcon />} onClick={save}>Save Script</Button>
+        </Box>
+
+        <DryRunResultsDialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} results={dryRunResults} />
+      </Drawer>
     )
   })

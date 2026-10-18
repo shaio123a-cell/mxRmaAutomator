@@ -2,7 +2,7 @@
 import { configureStore } from '@reduxjs/toolkit'
 import { TypedUseSelectorHook, useDispatch, useSelector } from 'react-redux'
 import fbcskm from './fbcskmSlice'
-import { setActiveSystemPromptId, setAiModels, setSystemPrompts } from './fbcskmSlice'
+import { setActiveSystemPromptId, setAiModels, setSystemPrompts, setThemePreference } from './fbcskmSlice'
 import type { PersistedAISettings } from '../utils/fileApi'
 
 export const store = configureStore({ reducer: { fbcskm } })
@@ -22,6 +22,7 @@ function readLocalAISettings(): PersistedAISettings | null {
 			models: parsed.models,
 			prompts: parsed.prompts,
 			activePromptId: typeof parsed.activePromptId === 'string' ? parsed.activePromptId : null,
+			themePreference: parsed.themePreference === 'light' || parsed.themePreference === 'dark' || parsed.themePreference === 'system' ? parsed.themePreference : undefined,
 		}
 	} catch (error) {
 		console.warn('Unable to read legacy browser AI settings.', error)
@@ -30,14 +31,15 @@ function readLocalAISettings(): PersistedAISettings | null {
 }
 
 function getCurrentAISettings(): PersistedAISettings {
-	const { aiModels, systemPrompts, activeSystemPromptId } = store.getState().fbcskm
-	return { models: aiModels, prompts: systemPrompts, activePromptId: activeSystemPromptId }
+	const { aiModels, systemPrompts, activeSystemPromptId, themePreference } = store.getState().fbcskm
+	return { models: aiModels, prompts: systemPrompts, activePromptId: activeSystemPromptId, themePreference }
 }
 
 function applyAISettings(settings: PersistedAISettings) {
 	store.dispatch(setAiModels(settings.models))
 	store.dispatch(setSystemPrompts(settings.prompts))
 	store.dispatch(setActiveSystemPromptId(settings.activePromptId))
+	if (settings.themePreference) store.dispatch(setThemePreference(settings.themePreference))
 }
 
 export const aiSettingsReady = (async () => {

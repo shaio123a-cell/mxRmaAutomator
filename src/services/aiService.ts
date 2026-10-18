@@ -47,19 +47,24 @@ function extractScript(response: string): string {
   return (fenced?.[1] ?? response).trim()
 }
 
-function parseSuggestions(response: string): string[] {
+function parseSuggestionList(response: string): string[] {
   const tagged = response.match(/(?:<FOLLOW_UPS>\s*|NEXT_PROMPTS:\s*)(\[[\s\S]*?\])(?:\s*<\/FOLLOW_UPS>)?/i)
   const jsonText = tagged?.[1] ?? response
+  const match = jsonText.match(/\[[\s\S]*\]/)
   try {
-    const parsed = JSON.parse(jsonText)
+    const parsed = JSON.parse(match?.[0] ?? jsonText)
     const suggestions = Array.isArray(parsed) ? parsed : parsed.suggestions
     if (Array.isArray(suggestions)) {
-      return suggestions.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 3)
+      return suggestions.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
     }
   } catch {
     return []
   }
   return []
+}
+
+function parseSuggestions(response: string): string[] {
+  return parseSuggestionList(response).slice(0, 3)
 }
 
 function parseResponse(response: string): { script: string; suggestions: string[]; title: string; fileName: string; language: string } {
@@ -400,6 +405,35 @@ export async function generateScriptFromPrompt(
   }
 
   throw new AiGenerationError(`All configured AI models failed. ${failures.join(' | ')}`, attemptedModels)
+}
+
+export async function generateMoreSuggestions(
+  prompt: string,
+  script: string,
+  existing: string[] = [],
+  models: AiModelConfig[] = [],
+  systemPrompt = getActiveSystemPrompt(),
+  count = 3,
+): Promise<string[]> {
+  const chain = getFallbackChain(models)
+  if (!chain.length) return []
+
+  const avoidList = existing.map(item => `- ${item}`).join('\n')
+  const seen = new Set(existing.map(item => item.trim().toLowerCase()))
+  const userPrompt = `Suggest ${count} new follow-up prompts the user might want next for this automation script. They must be relevant and different from the existing suggestions.\n\nOriginal request:\n${prompt}\n\nCurrent script:\n${script}\n\nExisting suggestions to avoid:\n${avoidList || '(none)'}`
+  const instructions = `${systemPrompt}\nReturn only a valid JSON array containing exactly ${count} new, context-specific follow-up prompt strings.`
+
+  for (const model of chain) {
+    try {
+      const response = await requestModel(model, userPrompt, instructions)
+      const fresh = parseSuggestionList(response).filter(item => !seen.has(item.trim().toLowerCase()))
+      if (fresh.length) return fresh.slice(0, count)
+    } catch {
+      continue
+    }
+  }
+
+  return []
 }
 
 function scriptTypeFromContent(content: string): string {

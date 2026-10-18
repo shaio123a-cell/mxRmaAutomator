@@ -1,9 +1,11 @@
 import type { AIModelConfig, AISystemPrompt } from '../config'
+import type { ThemePreference } from '../theme'
 
 export interface PersistedAISettings {
   models: AIModelConfig[]
   prompts: AISystemPrompt[]
   activePromptId: string | null
+  themePreference?: ThemePreference
 }
 
 export interface AgenticChatMessage {

@@ -16,6 +16,8 @@ import {
   FormControlLabel,
   IconButton,
   MenuItem,
+  Radio,
+  RadioGroup,
   Stack,
   TextField,
   Typography,
@@ -33,8 +35,11 @@ import {
   setDefaultDeviceSettings,
   setDefaultScriptSettings,
   setSystemPrompts,
+  setThemePreference,
 } from '../store/fbcskmSlice'
 import type { AIModelConfig, AISystemPrompt } from '../config'
+import type { DefaultScriptSettings } from '../store/fbcskmSlice'
+import type { ThemePreference } from '../theme'
 import { fetchProviderModels, testAiModel } from '../services/aiService'
 
 const newModel = (): AIModelConfig => ({
@@ -76,10 +81,11 @@ function modelTestSignature(model: AIModelConfig): string {
 export default function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dispatch = useAppDispatch()
   const defaults = useAppSelector(state => state.fbcskm.defaultDeviceSettings || {})
-  const scriptDefaults = useAppSelector(state => state.fbcskm.defaultScriptSettings || {})
+  const scriptDefaults = useAppSelector(state => state.fbcskm.defaultScriptSettings) || ({} as DefaultScriptSettings)
   const aiModels = useAppSelector(state => state.fbcskm.aiModels)
   const systemPrompts = useAppSelector(state => state.fbcskm.systemPrompts)
   const activeSystemPromptId = useAppSelector(state => state.fbcskm.activeSystemPromptId)
+  const currentThemePreference = useAppSelector(state => state.fbcskm.themePreference)
 
   const [port, setPort] = useState<string | number | null>(null)
   const [timeoutMs, setTimeoutMs] = useState<string | number | null>(null)
@@ -107,6 +113,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
   const [modelTestResults, setModelTestResults] = useState<Record<string, ModelTestResult>>({})
   const [draftTestResult, setDraftTestResult] = useState<ModelTestResult | null>(null)
   const [isTestingDraft, setIsTestingDraft] = useState(false)
+  const [theme, setTheme] = useState<ThemePreference>('system')
 
   useEffect(() => {
     if (!open) return
@@ -131,7 +138,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     setDraftTestResult(null)
     setPromptDraft(newPrompt())
     setModelStatus('')
-  }, [open, defaults, scriptDefaults, aiModels, systemPrompts, activeSystemPromptId])
+    setTheme(currentThemePreference)
+  }, [open, defaults, scriptDefaults, aiModels, systemPrompts, activeSystemPromptId, currentThemePreference])
 
   const isDirty = () => (
     (defaults.port ?? null) !== (port ?? null)
@@ -151,6 +159,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     || activePromptId !== activeSystemPromptId
     || Boolean(modelDraft.name || modelDraft.model || modelDraft.apiKey || modelDraft.baseUrl !== 'https://api.openai.com/v1')
     || Boolean(promptDraft.name || promptDraft.content)
+    || theme !== currentThemePreference
   )
 
   const save = () => {
@@ -173,6 +182,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     dispatch(setAiModels(models))
     dispatch(setSystemPrompts(prompts))
     dispatch(setActiveSystemPromptId(activePromptId))
+    dispatch(setThemePreference(theme))
     setConfirmOpen(false)
     onClose()
   }
@@ -286,15 +296,29 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     })
   }
 
-  const sectionSx = { '&:before': { display: 'none' }, border: '1px solid #dce3ea', borderRadius: '4px !important', boxShadow: 'none', backgroundColor: '#fff' }
+  const sectionSx = { '&:before': { display: 'none' }, border: '1px solid', borderColor: 'divider', borderRadius: '4px !important', boxShadow: 'none', backgroundColor: 'background.paper' }
 
   return (
     <>
-      <Dialog open={open} onClose={requestClose} maxWidth='md' fullWidth PaperProps={{ sx: { backgroundColor: '#fff', color: '#17212b' } }}>
+      <Dialog open={open} onClose={requestClose} maxWidth='md' fullWidth>
         <DialogTitle>Configuration</DialogTitle>
         <DialogContent>
           <Stack spacing={1} sx={{ mt: 1 }}>
             <Accordion defaultExpanded sx={sectionSx}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}><Typography fontWeight={600}>Appearance</Typography></AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={1.5}>
+                  <Typography variant='body2' color='text.secondary'>Theme for the whole application. "System" follows your operating system's light/dark setting.</Typography>
+                  <RadioGroup row value={theme} onChange={event => setTheme(event.target.value as ThemePreference)}>
+                    <FormControlLabel value='light' control={<Radio size='small' />} label='Light' />
+                    <FormControlLabel value='dark' control={<Radio size='small' />} label='Dark' />
+                    <FormControlLabel value='system' control={<Radio size='small' />} label='System' />
+                  </RadioGroup>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion sx={sectionSx}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}><Typography fontWeight={600}>Device Defaults</Typography></AccordionSummary>
               <AccordionDetails>
                 <Stack spacing={1.5}>
@@ -332,7 +356,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
                 <Stack spacing={1.5}>
                   <Typography variant='body2' color='text.secondary'>Enabled models are tried in the order shown. Timeouts, rate limits, network failures, and invalid responses move generation to the next enabled model.</Typography>
                   {models.map((model, index) => (
-                    <Box key={model.id} draggable onDragStart={event => { setDragIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (dragIndex !== null) reorder(dragIndex, index); setDragIndex(null) }} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: '1px solid #dce3ea', borderRadius: 1, backgroundColor: '#fff', cursor: 'grab' }}>
+                    <Box key={model.id} draggable onDragStart={event => { setDragIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (dragIndex !== null) reorder(dragIndex, index); setDragIndex(null) }} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1, backgroundColor: 'background.paper', cursor: 'grab' }}>
                       <Typography variant='caption' color='text.secondary' sx={{ minWidth: 24 }}>{index + 1}.</Typography>
                       <Box sx={{ flex: 1, minWidth: 150 }}>
                         <Typography fontWeight={600}>{model.name}</Typography>
@@ -415,7 +439,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
                 <Stack spacing={1.5}>
                   <Typography variant='body2' color='text.secondary'>The active system prompt is sent with each user request to the model chain.</Typography>
                   {prompts.map(prompt => (
-                    <Box key={prompt.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: '1px solid #dce3ea', borderRadius: 1 }}>
+                    <Box key={prompt.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                       <Button size='small' variant={activePromptId === prompt.id ? 'contained' : 'outlined'} onClick={() => setActivePromptId(prompt.id)}>{activePromptId === prompt.id ? 'Active' : 'Use'}</Button>
                       <Typography sx={{ flex: 1 }}>{prompt.name}</Typography>
                       <Button size='small' onClick={() => setPromptDraft({ ...prompt })}>Edit</Button>

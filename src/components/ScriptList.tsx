@@ -1,12 +1,18 @@
 
 import React, { useState, useEffect } from 'react'
-import { Button, Box, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, Tooltip } from '@mui/material'
+import { Button, Box, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, FormControlLabel, Checkbox, Tooltip } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import ContentCutIcon from '@mui/icons-material/ContentCut'
+import ScienceIcon from '@mui/icons-material/Science'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import FileCopyOutlinedIcon from '@mui/icons-material/FileCopyOutlined'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import { addScript, deleteScript, reorderScripts } from '../store/fbcskmSlice'
 import { v4 as uuid } from 'uuid'
@@ -14,6 +20,8 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import DryRunResultsDialog, { DryRunResults } from './DryRunResultsDialog'
+import { buildDryRunCommands } from '../utils/scriptArgs'
 
 function SortableScriptItem({ s, idx, isSelected, onSelect, onSelectScript, dev, openMenu }: { s: any, idx: number, isSelected: boolean, onSelect: (id: string | null) => void, onSelectScript?: (id: string, deviceId: string) => void, dev: any, openMenu: (e: React.MouseEvent<HTMLElement>, id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id })
@@ -30,30 +38,30 @@ function SortableScriptItem({ s, idx, isSelected, onSelect, onSelectScript, dev,
 
   return (
     <ListItem ref={setNodeRef} style={style} secondaryAction={
-      <IconButton edge='end' onClick={(e) => openMenu(e, s.id)} aria-label='actions' size='small' sx={{ color: isSelected ? '#fff' : undefined }}>
+      <IconButton edge='end' onClick={(e) => openMenu(e, s.id)} aria-label='actions' size='small' sx={{ color: isSelected ? 'common.white' : undefined }}>
         <MoreVertIcon />
       </IconButton>
-    } sx={{ backgroundColor: isSelected ? '#0b3d91' : (idx % 2 === 1 ? 'rgba(11,61,145,0.08)' : 'transparent') }}>
+    } sx={theme => ({ backgroundColor: isSelected ? theme.palette.primary.main : (idx % 2 === 1 ? theme.palette.action.hover : 'transparent') })}>
       <IconButton {...attributes} {...listeners} size='small' sx={{ mr: 1, cursor: 'grab' }}>
         <DragIndicatorIcon />
       </IconButton>
       <ListItemButton
         selected={isSelected}
         onClick={() => { if (onSelectScript) onSelectScript(s.id, dev.id); else onSelect(s.id) }}
-        sx={{ py: 0.25, color: isSelected ? '#fff' : undefined, flex: 1 }}
+        sx={{ py: 0.25, color: isSelected ? 'common.white' : undefined, flex: 1 }}
       >
         <ListItemText primary={
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             {errorMessage && (
               <Tooltip title={errorMessage} placement='top'>
-                <ErrorOutlineIcon sx={{ mr: 1, fontSize: 14, color: '#d32f2f' }} />
+                <ErrorOutlineIcon sx={{ mr: 1, fontSize: 14, color: 'error.main' }} />
               </Tooltip>
             )}
-            {s.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: '#4a148c' }} />}
+            {s.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: 'secondary.main' }} />}
             {s.instanceName}
           </Box>
         } secondary={`${s.args.method || 'GET'} ${s.args.outputFormat || 'json'}`}
-          sx={{ my: 0, '& .MuiListItemText-primary': { color: isSelected ? '#fff' : 'inherit' }, '& .MuiListItemText-secondary': { color: isSelected ? '#fff' : 'inherit' } }} />
+          sx={{ my: 0, '& .MuiListItemText-primary': { color: isSelected ? 'common.white' : 'inherit' }, '& .MuiListItemText-secondary': { color: isSelected ? 'common.white' : 'inherit' } }} />
       </ListItemButton>
     </ListItem>
   )
@@ -105,7 +113,7 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuScriptId, setMenuScriptId] = useState<string | null>(null)
   const [dryRunOpen, setDryRunOpen] = useState(false)
-  const [dryRunResults, setDryRunResults] = useState<{ command: string, originalCommand: string, results: string } | null>(null)
+  const [dryRunResults, setDryRunResults] = useState<DryRunResults | null>(null)
 
   const openMenu = (e: React.MouseEvent<HTMLElement>, id: string) => { e.stopPropagation(); setMenuAnchor(e.currentTarget); setMenuScriptId(id) }
   const closeMenu = () => { setMenuAnchor(null); setMenuScriptId(null) }
@@ -114,54 +122,19 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
     const s = dev?.scripts.find(x => x.id === scriptId)
     if (!s) return
 
-    const isPs1 = s.scriptPath.toLowerCase().endsWith('.ps1')
-    const pathQuoted = `"${s.scriptPath}"`
-
-    // Use encodedPreview (which now uses single quotes)
-    const argsBase = (s.isRestmon ? (' ' + encodedPreviewForScript(s)) : (' ' + (s.args || '')))
-
-    // Revert placeholders
-    const argsFinal = argsBase.replace(/<BMC_SEP>/g, '|').replace(/<BMC_STAR>/g, '*')
-
-    const originalCmd = `${pathQuoted}${argsFinal}`
-    const cmd = isPs1
-      ? `powershell.exe -ExecutionPolicy Bypass -File ${pathQuoted}${argsFinal}`
-      : `${pathQuoted}${argsFinal}`
+    const { originalCommand, command } = buildDryRunCommands(s)
 
     let results = '(placeholder - command not executed)'
     if (window.electronAPI?.runCommand) {
       try {
-        const res = await window.electronAPI.runCommand(cmd)
+        const res = await window.electronAPI.runCommand(command)
         results = res.error ? `Error: ${res.error}\nStdout: ${res.stdout}\nStderr: ${res.stderr}` : `Stdout: ${res.stdout}\nStderr: ${res.stderr}`
       } catch (e) {
         results = `Failed to run: ${e}`
       }
     }
-    setDryRunResults({ command: cmd, originalCommand: originalCmd, results })
+    setDryRunResults({ command, originalCommand, results })
     setDryRunOpen(true)
-  }
-
-  const encodedPreviewForScript = (s: any) => {
-    // Use single quotes for wrapping, escape single quotes as '' (PowerShell standard)
-    const escapeArg = (str: string) => str.replace(/'/g, "''")
-    if (!s.isRestmon) return s.args || ''
-    const parts: string[] = []
-    const a = s.args || {}
-    if (a.url) parts.push(`-url '${escapeArg(a.url)}'`)
-    if (a.method) parts.push(`-method ${a.method}`)
-    if (a.outputFormat) parts.push(`-outputFormat ${a.outputFormat}`)
-    if (a.payload) parts.push(`-payload '${escapeArg(a.payload)}'`)
-    if (a.searchKey) parts.push(`-searchKey '${escapeArg(a.searchKey)}'`)
-    if (a.searchString) parts.push(`-searchString '${escapeArg(a.searchString)}'`)
-    if (a.matchRegex) parts.push(`-matchRegex '${escapeArg(a.matchRegex)}'`)
-    if (a.username) parts.push(`-username '${escapeArg(a.username)}'`)
-    if (a.password) parts.push(`-password '${escapeArg(a.password)}'`)
-    // headers: passed raw
-    if (a.headers) parts.push(`-headers ${a.headers}`)
-    if (a.decryptPass) parts.push(`-decryptPass ${a.decryptPass}`)
-    let cmd = parts.join(' ')
-    cmd = cmd.replace(/\|/g, '<BMC_SEP>').replace(/\*/g, '<BMC_STAR>')
-    return cmd
   }
 
   const onEdit = (id: string) => {
@@ -231,7 +204,7 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   }
 
   return (
-    <Stack spacing={2} sx={{ minWidth: 420 }}>
+    <Stack spacing={2} sx={{ flex: 4, minWidth: 900 }}>
       <Typography variant='h6'>Scripts for: {dev.name}</Typography>
       <FormControlLabel control={<Checkbox checked={isRestmon} onChange={e => setIsRestmon(e.target.checked)} />} label="Is Restmon Script" />
       <Stack direction='row' spacing={1}>
@@ -243,7 +216,11 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
         }}>
           <FolderOpenIcon />
         </IconButton>
-        <Button variant='contained' onClick={create}>Add</Button>
+        <Tooltip title='Add script'>
+          <IconButton size='small' color='primary' onClick={create} aria-label='add script'>
+            <AddIcon />
+          </IconButton>
+        </Tooltip>
       </Stack>
 
       {/* Limit visible scripts to 10 and make the list scrollable to avoid pushing the edit form down */}
@@ -264,60 +241,15 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
       </Box>
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
-        <MenuItem onClick={() => { if (menuScriptId) onEdit(menuScriptId); closeMenu() }}>Edit</MenuItem>
-        <MenuItem onClick={() => { if (menuScriptId) duplicate(menuScriptId); closeMenu() }}>Duplicate</MenuItem>
-        <MenuItem onClick={() => { if (menuScriptId) dryRun(menuScriptId); closeMenu() }}>Dry Run</MenuItem>
-        <MenuItem onClick={() => { if (menuScriptId && onCopyScript && deviceId) onCopyScript(menuScriptId, deviceId); closeMenu() }}>Copy</MenuItem>
-        <MenuItem onClick={() => { if (menuScriptId && onCutScript && deviceId) onCutScript(menuScriptId, deviceId); closeMenu() }}>Cut</MenuItem>
-        <MenuItem onClick={() => { if (menuScriptId) remove(menuScriptId); closeMenu() }} sx={{ color: 'error.main' }}>Delete</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId) onEdit(menuScriptId); closeMenu() }}><DriveFileRenameOutlineIcon fontSize='small' sx={{ mr: 1 }} />Edit</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId) duplicate(menuScriptId); closeMenu() }}><FileCopyOutlinedIcon fontSize='small' sx={{ mr: 1 }} />Duplicate</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId) dryRun(menuScriptId); closeMenu() }}><ScienceIcon fontSize='small' sx={{ mr: 1 }} />Dry Run</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId && onCopyScript && deviceId) onCopyScript(menuScriptId, deviceId); closeMenu() }}><ContentCopyIcon fontSize='small' sx={{ mr: 1 }} />Copy</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId && onCutScript && deviceId) onCutScript(menuScriptId, deviceId); closeMenu() }}><ContentCutIcon fontSize='small' sx={{ mr: 1 }} />Cut</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId) remove(menuScriptId); closeMenu() }} sx={{ color: 'error.main' }}><DeleteOutlineIcon fontSize='small' sx={{ mr: 1 }} />Delete</MenuItem>
       </Menu>
 
-      <Dialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} maxWidth='md' fullWidth>
-        <DialogTitle>Dry Run Results</DialogTitle>
-        <DialogContent>
-          {dryRunResults && (
-            <>
-              <Box sx={{ position: 'relative', mb: 2 }}>
-                <Typography variant='h6'>Original Command</Typography>
-                <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.originalCommand)}>
-                  <ContentCopyIcon />
-                </IconButton>
-                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4 }}>
-                  {dryRunResults.originalCommand}
-                </pre>
-              </Box>
-              <Box sx={{ position: 'relative', mb: 2 }}>
-                <Typography variant='h6'>Executed Command</Typography>
-                <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.command)}>
-                  <ContentCopyIcon />
-                </IconButton>
-                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4 }}>
-                  {dryRunResults.command}
-                </pre>
-              </Box>
-              <Box sx={{ position: 'relative' }}>
-                <Typography variant='h6'>Results</Typography>
-                <IconButton sx={{ position: 'absolute', top: 0, right: 0 }} onClick={() => navigator.clipboard.writeText(dryRunResults.results)}>
-                  <ContentCopyIcon />
-                </IconButton>
-                <Box sx={{ fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: 8, borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>
-                  {dryRunResults.results.split(/\r?\n/).map((line, i) => (
-                    <div key={i} style={{
-                      color: line.toLowerCase().includes('error') ? 'red' : line.toLowerCase().includes('warn') ? 'orange' : 'inherit',
-                      minHeight: '1.2em'
-                    }}>
-                      {line}
-                    </div>
-                  ))}
-                </Box>
-              </Box>
-            </>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDryRunOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      <DryRunResultsDialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} results={dryRunResults} />
     </Stack>
   )
 }

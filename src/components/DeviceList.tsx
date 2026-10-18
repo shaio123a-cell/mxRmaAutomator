@@ -1,10 +1,17 @@
 
 import React, { useState } from 'react'
-import { Button, List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, Box, Tooltip } from '@mui/material'
+import { List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography, IconButton, Menu, MenuItem, Box, Tooltip } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import EditIcon from '@mui/icons-material/Edit'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import AddIcon from '@mui/icons-material/Add'
+import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline'
+import FileCopyOutlinedIcon from '@mui/icons-material/FileCopyOutlined'
+import ContentPasteIcon from '@mui/icons-material/ContentPaste'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import { addDevice, deleteDevice, enableDevice, disableDevice, reorderDevices } from '../store/fbcskmSlice'
 import { v4 as uuid } from 'uuid'
@@ -29,33 +36,33 @@ function SortableItem({ d, idx, isSelected, selectedId, onSelect, openMenu }: { 
 
   return (
     <ListItem ref={setNodeRef} style={style} secondaryAction={
-      <IconButton edge='end' onClick={(e) => openMenu(e, d.id)} aria-label='actions' size='small' sx={{ color: isSelected ? '#fff' : undefined }}>
+      <IconButton edge='end' onClick={(e) => openMenu(e, d.id)} aria-label='actions' size='small' sx={{ color: isSelected ? 'common.white' : undefined }}>
         <MoreVertIcon />
       </IconButton>
-    } sx={{ backgroundColor: isSelected ? '#0b3d91' : (idx % 2 === 1 ? 'rgba(11,61,145,0.08)' : 'transparent') }}>
+    } sx={theme => ({ backgroundColor: isSelected ? theme.palette.primary.main : (idx % 2 === 1 ? theme.palette.action.hover : 'transparent') })}>
       <IconButton {...attributes} {...listeners} size='small' sx={{ mr: 1, cursor: 'grab' }}>
         <DragIndicatorIcon />
       </IconButton>
       <ListItemButton
         selected={isSelected}
         onClick={() => onSelect(d.id)}
-        sx={{ py: 0.25, color: isSelected ? '#fff' : undefined, flex: 1 }}
+        sx={{ py: 0.25, color: isSelected ? 'common.white' : undefined, flex: 1 }}
       >
         <ListItemText primary={
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             {deviceErrorTooltip && (
               <Tooltip title={deviceErrorTooltip} placement='top'>
-                <ErrorOutlineIcon sx={{ mr: 1, fontSize: 14, color: '#d32f2f' }} />
+                <ErrorOutlineIcon sx={{ mr: 1, fontSize: 14, color: 'error.main' }} />
               </Tooltip>
             )}
-            {d.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: '#4a148c' }} />}
+            {d.dirty && <EditIcon sx={{ mr: 1, fontSize: 14, color: 'secondary.main' }} />}
             {d.disabled && d.originalLine ? (d.originalLine.length > 50 ? d.originalLine.substring(0, 50) + '...' : d.originalLine) : d.name}
           </Box>
         } secondary={`Scripts: ${(d as any).matchingScriptsCount ?? d.scripts.length}`}
           sx={{
             my: 0,
-            '& .MuiListItemText-primary': { color: isSelected ? '#fff' : (d.disabled ? 'text.disabled' : 'inherit') },
-            '& .MuiListItemText-secondary': { color: isSelected ? '#fff' : (d.disabled ? 'text.disabled' : 'inherit') }
+            '& .MuiListItemText-primary': { color: isSelected ? 'common.white' : (d.disabled ? 'text.disabled' : 'inherit') },
+            '& .MuiListItemText-secondary': { color: isSelected ? 'common.white' : (d.disabled ? 'text.disabled' : 'inherit') }
           }}
         />
       </ListItemButton>
@@ -144,7 +151,7 @@ export default function DeviceList({ devices: devicesProp, fullDevices: fullDevi
   }
 
   return (
-    <Stack spacing={2} sx={{ minWidth: 360 }}>
+    <Stack spacing={2} sx={{ flex: 1, minWidth: 360 }}>
       <Stack direction='row' alignItems='center' spacing={1}>
         <Typography variant='h6'>Devices</Typography>
         <IconButton size='small' onClick={(e) => setGlobalMenuAnchor(e.currentTarget)} aria-label='device options'>
@@ -154,7 +161,11 @@ export default function DeviceList({ devices: devicesProp, fullDevices: fullDevi
       <Stack direction='row' spacing={1}>
         <TextField label='Device name' value={name} onChange={e => setName(e.target.value)} />
         <TextField label='Forced IP (optional)' value={forcedIp} onChange={e => setForcedIp(e.target.value)} />
-        <Button variant='contained' onClick={create}>Add</Button>
+        <Tooltip title='Add device'>
+          <IconButton size='small' color='primary' onClick={create} aria-label='add device'>
+            <AddIcon />
+          </IconButton>
+        </Tooltip>
       </Stack>
       {/* limit visible devices to 10 and make list scrollable */}
       <div style={{ maxHeight: 10 * 48, overflowY: 'auto' }}>
@@ -174,14 +185,16 @@ export default function DeviceList({ devices: devicesProp, fullDevices: fullDevi
       </div>
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
-        <MenuItem onClick={() => { if (menuDeviceId) onEdit(menuDeviceId); closeMenu() }}>Edit</MenuItem>
-        <MenuItem onClick={() => { if (menuDeviceId) duplicate(menuDeviceId); closeMenu() }}>Duplicate</MenuItem>
-        <MenuItem onClick={() => { if (menuDeviceId) handlePasteToDevice(menuDeviceId); closeMenu() }} disabled={!((clipboardProp || clipboard) && (clipboardProp || clipboard).type === 'script')}>Paste Script</MenuItem>
+        <MenuItem onClick={() => { if (menuDeviceId) onEdit(menuDeviceId); closeMenu() }}><DriveFileRenameOutlineIcon fontSize='small' sx={{ mr: 1 }} />Edit</MenuItem>
+        <MenuItem onClick={() => { if (menuDeviceId) duplicate(menuDeviceId); closeMenu() }}><FileCopyOutlinedIcon fontSize='small' sx={{ mr: 1 }} />Duplicate</MenuItem>
+        <MenuItem onClick={() => { if (menuDeviceId) handlePasteToDevice(menuDeviceId); closeMenu() }} disabled={!((clipboardProp || clipboard) && (clipboardProp || clipboard).type === 'script')}><ContentPasteIcon fontSize='small' sx={{ mr: 1 }} />Paste Script</MenuItem>
         {/* Enable / Disable device (comment/uncomment) */}
         <MenuItem onClick={() => { if (menuDeviceId) { const d = devices.find(x => x.id === menuDeviceId); if (d) { if (d.disabled) dispatch(enableDevice(menuDeviceId)); else dispatch(disableDevice(menuDeviceId)) } } closeMenu() }}>
-          {menuDeviceId && ((devices.find(x => x.id === menuDeviceId) || {}).disabled) ? 'Enable Device' : 'Disable Device'}
+          {menuDeviceId && ((devices.find(x => x.id === menuDeviceId) || {}).disabled)
+            ? <><VisibilityIcon fontSize='small' sx={{ mr: 1 }} />Enable Device</>
+            : <><VisibilityOffIcon fontSize='small' sx={{ mr: 1 }} />Disable Device</>}
         </MenuItem>
-        <MenuItem onClick={() => { if (menuDeviceId) remove(menuDeviceId); closeMenu() }} sx={{ color: 'error.main' }}>Delete</MenuItem>
+        <MenuItem onClick={() => { if (menuDeviceId) remove(menuDeviceId); closeMenu() }} sx={{ color: 'error.main' }}><DeleteOutlineIcon fontSize='small' sx={{ mr: 1 }} />Delete</MenuItem>
       </Menu>
 
       <Menu anchorEl={globalMenuAnchor} open={Boolean(globalMenuAnchor)} onClose={() => setGlobalMenuAnchor(null)}>

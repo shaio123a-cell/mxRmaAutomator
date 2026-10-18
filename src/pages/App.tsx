@@ -1,24 +1,25 @@
 
 import React, { useState, useMemo } from 'react'
-import { Box, Button, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar } from '@mui/material'
+import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Tooltip } from '@mui/material'
 import Viewer from './Viewer'
 import DeviceList from '../components/DeviceList'
 import ScriptList from '../components/ScriptList'
 import ScriptForm from '../components/ScriptForm'
 import DeviceForm from '../components/DeviceForm'
-import { useAppSelector } from '../store/store'
+import { useAppDispatch, useAppSelector } from '../store/store'
+import { parseFBCSKM } from '../store/fbcskmSlice'
 
 import ErrorBoundary from '../components/ErrorBoundary'
 import SettingsDialog from '../components/SettingsDialog'
 import HelpDialog from '../components/HelpDialog'
 import AgenticScriptPanel from '../components/AgenticScriptPanel'
-import SettingsIcon from '@mui/icons-material/Settings'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
-
-// Logos
-import BMCHelixLogo from '../../logo/BMCHelix Logo Medium Transparent.png'
-import MatrixLogo from '../../logo/Matrix-Logo-Flat.png'
-import MatrixKBLogo from '../../logo/MatrixKB for BMC Helix.png'
+import AppShell, { AppView } from '../components/AppShell'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import SaveIcon from '@mui/icons-material/Save'
+import SaveAltIcon from '@mui/icons-material/SaveAlt'
+import OpenInBrowserIcon from '@mui/icons-material/OpenInBrowser'
+import LaunchIcon from '@mui/icons-material/Launch'
+import CloseIcon from '@mui/icons-material/Close'
 
 export default function App() {
   // Global error logging to help capture runtime issues in dev
@@ -34,16 +35,17 @@ export default function App() {
   const [raw, setRaw] = useState<string>('')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null)
+  const [scriptEditorOpen, setScriptEditorOpen] = useState(false)
   const [deviceFormOpen, setDeviceFormOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [showDisabled, setShowDisabled] = useState(false)
-  const [agenticMode, setAgenticMode] = useState(false)
+  const [view, setView] = useState<AppView>('editor')
 
   // Unsaved changes dialog state
   const [unsavedOpen, setUnsavedOpen] = useState(false)
   const unsavedActionRef = React.useRef<(() => void) | null>(null)
-  const currentUnsavedTargetRef = React.useRef<{ type: 'device' | 'script' | 'closeDeviceForm', payload?: any } | null>(null)
+  const currentUnsavedTargetRef = React.useRef<{ type: 'device' | 'script' | 'closeDeviceForm' | 'closeScriptEditor', payload?: any } | null>(null)
 
   // Search state
   const [searchText, setSearchText] = useState('')
@@ -56,6 +58,16 @@ export default function App() {
   const activeSystemPromptId = useAppSelector(s => s.fbcskm.activeSystemPromptId)
 
   const [loadUnsavedOpen, setLoadUnsavedOpen] = useState(false)
+
+  const dispatch = useAppDispatch()
+  // Parse raw text into the store whenever the raw text itself changes.
+  // This must live in App (which never unmounts): if it lived in Viewer, it
+  // would re-run on every mount and wipe in-memory changes (e.g. a script
+  // just added by the agentic panel) because parseFBCSKM rebuilds devices
+  // from the raw text.
+  React.useEffect(() => {
+    if (raw && raw.trim().length > 0) dispatch(parseFBCSKM(raw))
+  }, [raw])
   const loadPendingPathRef = React.useRef<string | null>(null)
 
   const openFile = async () => {
@@ -73,6 +85,31 @@ export default function App() {
     const txt = await window.electronAPI.readFile(p)
     setFilePath(p)
     setRaw(txt)
+  }
+
+  const saveConfigFile = async (targetPath: string) => {
+    const { store } = await import('../store/store')
+    const { serializeDevicesWithComments } = await import('../services/serializer')
+    const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
+    const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
+    await window.electronAPI.writeFile(targetPath, text, { maxBackups })
+    const { setDirty } = await import('../store/fbcskmSlice')
+    store.dispatch(setDirty(false))
+  }
+
+  const onSave = async () => {
+    if (!filePath) return
+    if (!window.electronAPI) { alert('Save not available in browser mode. Use Save As.'); return }
+    await saveConfigFile(filePath)
+    alert(`Saved with backup rotation.`)
+  }
+
+  const onSaveAs = async () => {
+    const suggested = filePath || 'config.txt'
+    const saveTo = await window.electronAPI.saveFile(suggested)
+    if (!saveTo) return
+    await saveConfigFile(saveTo)
+    alert('Exported file saved.')
   }
 
   const filteredDevices = useMemo(() => {
@@ -178,11 +215,13 @@ export default function App() {
     // If switching to same device, allow
     if (id === selectedDeviceId) { setSelectedDeviceId(id); return }
 
+    const proceed = () => { setSelectedDeviceId(id); setSelectedScriptId(null); setScriptEditorOpen(false) }
+
     // If a script is being edited and dirty, prompt first
-    if (selectedScriptId && scriptFormRef.current && scriptFormRef.current.isDirty && scriptFormRef.current.isDirty()) {
+    if (scriptEditorOpen && scriptFormRef.current && scriptFormRef.current.isDirty && scriptFormRef.current.isDirty()) {
       dirtyFormTypeRef.current = 'script'
       currentUnsavedTargetRef.current = { type: 'device', payload: { id } }
-      unsavedActionRef.current = () => { setSelectedDeviceId(id); setSelectedScriptId(null) }
+      unsavedActionRef.current = proceed
       setUnsavedOpen(true)
       return
     }
@@ -191,14 +230,13 @@ export default function App() {
     if (deviceFormOpen && deviceFormRef.current && deviceFormRef.current.isDirty && deviceFormRef.current.isDirty()) {
       dirtyFormTypeRef.current = 'device'
       currentUnsavedTargetRef.current = { type: 'device', payload: { id } }
-      unsavedActionRef.current = () => { setSelectedDeviceId(id); setSelectedScriptId(null) }
+      unsavedActionRef.current = proceed
       setUnsavedOpen(true)
       return
     }
 
     // No dirty state, proceed
-    setSelectedDeviceId(id)
-    setSelectedScriptId(null)
+    proceed()
   }
 
   const requestOpenDeviceForm = (id: string | null) => {
@@ -215,18 +253,35 @@ export default function App() {
 
   const requestSelectScript = (scriptId: string | null, deviceId?: string | null) => {
     // If selecting same script, nothing
-    if (scriptId === selectedScriptId) { setSelectedScriptId(scriptId); return }
+    if (scriptId === selectedScriptId) { setSelectedScriptId(scriptId); if (scriptId) setScriptEditorOpen(true); return }
 
-    if (scriptFormRef.current && scriptFormRef.current.isDirty && scriptFormRef.current.isDirty()) {
+    const proceed = () => {
+      if (deviceId) setSelectedDeviceId(deviceId)
+      setSelectedScriptId(scriptId)
+      setScriptEditorOpen(Boolean(scriptId))
+    }
+
+    if (scriptEditorOpen && scriptFormRef.current && scriptFormRef.current.isDirty && scriptFormRef.current.isDirty()) {
       dirtyFormTypeRef.current = 'script'
       currentUnsavedTargetRef.current = { type: 'script', payload: { scriptId, deviceId } }
-      unsavedActionRef.current = () => { if (deviceId) setSelectedDeviceId(deviceId); setSelectedScriptId(scriptId) }
+      unsavedActionRef.current = proceed
       setUnsavedOpen(true)
       return
     }
 
-    setSelectedDeviceId(deviceId || null)
-    setSelectedScriptId(scriptId)
+    proceed()
+  }
+
+  const handleScriptEditorClose = () => {
+    if (scriptFormRef.current && scriptFormRef.current.isDirty && scriptFormRef.current.isDirty()) {
+      dirtyFormTypeRef.current = 'script'
+      currentUnsavedTargetRef.current = { type: 'closeScriptEditor' }
+      unsavedActionRef.current = () => { setScriptEditorOpen(false); setSelectedScriptId(null) }
+      setUnsavedOpen(true)
+      return
+    }
+    setScriptEditorOpen(false)
+    setSelectedScriptId(null)
   }
 
   const handleDeviceFormClose = () => {
@@ -277,85 +332,77 @@ export default function App() {
     dirtyFormTypeRef.current = null
   }
 
-  const appContent = agenticMode ? (
-    <Box sx={{ p: 3, background: '#f8fafc', minHeight: '100vh' }}>
-      <Stack spacing={2}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant='h4'>Agentic Scripting</Typography>
-          <Button variant='outlined' onClick={() => setAgenticMode(false)}>Back to Main App</Button>
-        </Box>
-        <AgenticScriptPanel
-          models={aiModels}
-          prompts={systemPrompts}
-          activePromptId={activeSystemPromptId}
-          onAddToConfig={(deviceId, scriptId) => {
-            setSearchText('')
-            setSelectedDeviceId(deviceId)
-            setSelectedScriptId(scriptId)
-            setAgenticMode(false)
-          }}
-        />
-      </Stack>
-    </Box>
-  ) : (
-    <Stack spacing={2} sx={{ py: 3 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'stretch', width: '100%' }}>
-          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-start' }}>
-            <img src={MatrixKBLogo} alt="MatrixKB for BMC Helix" style={{ height: 56 }} />
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <Typography variant='h4'>PATROL Scripting KM File Based Configuraiton Editor</Typography>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <Button variant='contained' onClick={() => setAgenticMode(true)}>Agentic Scripting</Button>
-              <IconButton size='small' aria-label='help' onClick={() => setHelpOpen(true)}><HelpOutlineIcon /></IconButton>
-              <IconButton size='small' aria-label='settings' onClick={() => setSettingsOpen(true)}><SettingsIcon /></IconButton>
-              {window.electronAPI?.isElectron ? (
-                <Button size='small' variant='outlined' onClick={() => window.electronAPI.openExternal?.('http://localhost:5173')}>Open in Browser</Button>
-              ) : (
-                <Button size='small' variant='outlined' onClick={async () => { if (window.electronAPI?.openInElectron) { await window.electronAPI.openInElectron() } }}>Open in Electron</Button>
-              )}
-              <img src={MatrixLogo} alt="Matrix" style={{ height: 30 }} />
-              <img src={BMCHelixLogo} alt="BMCHelix" style={{ height: 34, background: 'transparent' }} />
-            </Box>
-          </Box>
-        </Box>
+  const selectedDevice = devices.find(x => x.id === selectedDeviceId) || null
+  const selectedScript = selectedDevice?.scripts.find(x => x.id === selectedScriptId) || null
 
-        <Stack direction='row' spacing={1}>
-          <Button variant='contained' onClick={openFile}>Load Configuration File</Button>
-          <Button variant='outlined' onClick={async () => {
-            if (!filePath) return
-            if (!window.electronAPI) { alert('Save not available in browser mode. Use Save As.'); return }
-            const { store } = await import('../store/store')
-            const { serializeDevicesWithComments } = await import('../services/serializer')
-            const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
-            const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
-            await window.electronAPI.writeFile(filePath, text, { maxBackups })
-            // mark as saved
-            const { setDirty } = await import('../store/fbcskmSlice')
-            store.dispatch(setDirty(false))
-            alert(`Saved with backup rotation (${maxBackups} generations).`)
-          }}>Save</Button>
-          <Button variant='outlined' onClick={async () => {
-            const suggested = filePath || 'config.txt'
-            const saveTo = await window.electronAPI.saveFile(suggested)
-            if (!saveTo) return
-            const { store } = await import('../store/store')
-            const { serializeDevicesWithComments } = await import('../services/serializer')
-            const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
-            const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
-            await window.electronAPI.writeFile(saveTo, text, { maxBackups })
-            // mark as saved
-            const { setDirty } = await import('../store/fbcskmSlice')
-            store.dispatch(setDirty(false))
-            alert('Exported file saved.')
-          }}>Save As</Button>
-          {filePath && <Typography sx={{ ml: 2 }} component='span'>{filePath}</Typography>}
+  const appContent = (
+    <AppShell
+      view={view}
+      onViewChange={setView}
+      onOpenSettings={() => setSettingsOpen(true)}
+      onOpenHelp={() => setHelpOpen(true)}
+      electronAction={window.electronAPI?.isElectron ? (
+        <Tooltip title='Open in Browser' placement='right'>
+          <IconButton size='small' onClick={() => window.electronAPI.openExternal?.('http://localhost:5173')} aria-label='open in browser'>
+            <OpenInBrowserIcon fontSize='small' />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <Tooltip title='Open in Electron client' placement='right'>
+          <IconButton size='small' color='primary' onClick={async () => { if (window.electronAPI?.openInElectron) { await window.electronAPI.openInElectron() } }} aria-label='open in electron client'>
+            <LaunchIcon fontSize='small' />
+          </IconButton>
+        </Tooltip>
+      )}
+    >
+      {view === 'agentic' ? (
+        <Stack spacing={2}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <Typography variant='h4'>Agentic Scripting</Typography>
+          </Box>
+          <AgenticScriptPanel
+            models={aiModels}
+            prompts={systemPrompts}
+            activePromptId={activeSystemPromptId}
+            defaultDeviceId={selectedDeviceId}
+            onAddToConfig={(deviceId, scriptId) => {
+              setSearchText('')
+              setView('editor')
+              setSelectedDeviceId(deviceId)
+              setSelectedScriptId(scriptId)
+              setScriptEditorOpen(true)
+            }}
+          />
+        </Stack>
+      ) : (
+      <Stack spacing={2}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+            <Typography variant='h5'>PATROL Scripting KM File Based Configuration Editor</Typography>
+          </Box>
+
+        <Stack direction='row' spacing={1} alignItems='center' sx={{ flexWrap: 'wrap' }}>
+          <Tooltip title='Load Configuration File'>
+            <IconButton color='primary' onClick={openFile} aria-label='load configuration file'>
+              <FolderOpenIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title='Save'>
+            <span>
+              <IconButton onClick={onSave} disabled={!filePath} aria-label='save'>
+                <SaveIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title='Save As'>
+            <IconButton onClick={onSaveAs} aria-label='save as'>
+              <SaveAltIcon />
+            </IconButton>
+          </Tooltip>
+          {isDirty && <Chip label='Unsaved Changes' color='error' size='small' />}
+          {filePath && <Typography sx={{ ml: 1 }} variant='body2' color='text.secondary' component='span'>{filePath}</Typography>}
         </Stack>
 
         <Viewer raw={raw} onRawChange={(t: string) => { setRaw(t); /* mark dirty when raw edited */ (async () => { const { setDirty } = await import('../store/fbcskmSlice'); const { store } = await import('../store/store'); store.dispatch(setDirty(true)) })() }} />
-
-        {/* Show unsaved indicator when configuration is dirty */}
-        {isDirty && <Typography color='error' sx={{ ml: 1 }}>Unsaved Changes</Typography>}
 
         {/* Search area */}
         <Stack direction='row' spacing={1} alignItems='center'>
@@ -369,14 +416,13 @@ export default function App() {
               endAdornment: searchText ? (
                 <InputAdornment position='end'>
                   <IconButton size='small' edge='end' aria-label='clear search' onClick={() => setSearchText('')}>
-                    ✕
+                    <CloseIcon fontSize='small' />
                   </IconButton>
                 </InputAdornment>
               ) : undefined
             }}
           />
-          <FormControlLabel control={<Checkbox checked={searchInScripts} onChange={e => setSearchInScripts(e.target.checked)} />} label='Include scripts' />
-          <Button variant='contained' onClick={() => { /* explicit search button — filtering is live */ }}>Search</Button>
+          <FormControlLabel control={<Checkbox size='small' checked={searchInScripts} onChange={e => setSearchInScripts(e.target.checked)} />} label='Include scripts' />
         </Stack>
 
         {/* Search results counts */}
@@ -385,18 +431,21 @@ export default function App() {
         {/* One clean device list — scripts shown on selection */}
         <Stack direction='row' spacing={2}>
           <DeviceList devices={displayDevices} fullDevices={devices} selectedId={selectedDeviceId} onSelect={(id: any) => requestSelectDevice(id)} onRequestEdit={(id) => { requestSelectDevice(id); setDeviceFormOpen(true) }} onPasteScript={(deviceId) => onPasteScriptToDevice(deviceId)} clipboard={clipboard} showDisabled={showDisabled} onToggleShowDisabled={() => setShowDisabled(!showDisabled)} />
-          <ScriptList deviceId={selectedDeviceId} selectedId={selectedScriptId} searchText={searchText} searchInScripts={searchInScripts} onSelect={(id: any) => requestSelectScript(id, selectedDeviceId)} onRequestEdit={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId); }} onSelectScript={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onCopyScript={onCopyScript} onCutScript={onCutScript} />
+          <ScriptList deviceId={selectedDeviceId} selectedId={selectedScriptId} searchText={searchText} searchInScripts={searchInScripts} onSelect={(id: any) => requestSelectScript(id, selectedDeviceId)} onRequestEdit={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onSelectScript={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onCopyScript={onCopyScript} onCutScript={onCutScript} />
         </Stack>
 
-        {(() => {
-          const d = devices.find(x => x.id === selectedDeviceId)
-          if (!d) return null
-          const s = d.scripts.find(x => x.id === selectedScriptId)
-          if (!s) return null
-          return <ScriptForm ref={scriptFormRef} device={d} script={s} onChange={() => { }} />
-        })()}
+        {selectedDevice && selectedScript && (
+          <ScriptForm
+            ref={scriptFormRef}
+            open={scriptEditorOpen}
+            device={selectedDevice}
+            script={selectedScript}
+            onChange={() => { }}
+            onClose={handleScriptEditorClose}
+          />
+        )}
 
-        <DeviceForm ref={deviceFormRef} open={deviceFormOpen} device={devices.find(x => x.id === selectedDeviceId) || null} onClose={handleDeviceFormClose} />
+        <DeviceForm ref={deviceFormRef} open={deviceFormOpen} device={selectedDevice} onClose={handleDeviceFormClose} />
 
         {/* Unsaved changes dialog */}
         <Dialog open={unsavedOpen} onClose={handleUnsavedCancel}>
@@ -435,13 +484,7 @@ export default function App() {
               // Save in place
               const p = loadPendingPathRef.current
               if (!p) return
-              const { store } = await import('../store/store')
-              const { serializeDevicesWithComments } = await import('../services/serializer')
-              const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
-              const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
-              await window.electronAPI.writeFile(p, text, { maxBackups })
-              const { setDirty } = await import('../store/fbcskmSlice')
-              store.dispatch(setDirty(false))
+              await saveConfigFile(p)
               setLoadUnsavedOpen(false)
               const txt = await window.electronAPI.readFile(p)
               setFilePath(p)
@@ -455,13 +498,7 @@ export default function App() {
               const suggested = filePath || 'config.txt'
               const saveTo = await window.electronAPI.saveFile(suggested)
               if (!saveTo) return
-              const { store } = await import('../store/store')
-              const { serializeDevicesWithComments } = await import('../services/serializer')
-              const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
-              const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
-              await window.electronAPI.writeFile(saveTo, text, { maxBackups })
-              const { setDirty } = await import('../store/fbcskmSlice')
-              store.dispatch(setDirty(false))
+              await saveConfigFile(saveTo)
               setLoadUnsavedOpen(false)
               const txt = await window.electronAPI.readFile(p)
               setFilePath(p)
@@ -475,6 +512,8 @@ export default function App() {
         <Snackbar open={Boolean(clipMsg)} autoHideDuration={2000} onClose={() => setClipMsg(null)} message={clipMsg || ''} />
 
       </Stack>
+      )}
+    </AppShell>
   )
 
   return (
