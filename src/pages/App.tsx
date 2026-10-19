@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react'
-import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Tooltip } from '@mui/material'
+import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Tooltip, Tabs, Tab } from '@mui/material'
 import Viewer from './Viewer'
 import DeviceList from '../components/DeviceList'
 import ScriptList from '../components/ScriptList'
@@ -14,12 +14,15 @@ import SettingsDialog from '../components/SettingsDialog'
 import HelpDialog from '../components/HelpDialog'
 import AgenticScriptPanel from '../components/AgenticScriptPanel'
 import AppShell, { AppView } from '../components/AppShell'
+import BrandHeader from '../components/BrandHeader'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import SaveIcon from '@mui/icons-material/Save'
 import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import OpenInBrowserIcon from '@mui/icons-material/OpenInBrowser'
 import LaunchIcon from '@mui/icons-material/Launch'
 import CloseIcon from '@mui/icons-material/Close'
+import DnsIcon from '@mui/icons-material/Dns'
+import DataObjectIcon from '@mui/icons-material/DataObject'
 
 export default function App() {
   // Global error logging to help capture runtime issues in dev
@@ -41,6 +44,41 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false)
   const [showDisabled, setShowDisabled] = useState(false)
   const [view, setView] = useState<AppView>('editor')
+  const [editorTab, setEditorTab] = useState<'manage' | 'raw'>('manage')
+
+  // Resizable split between Devices and Scripts panes
+  const [devicePanePct, setDevicePanePct] = useState(() => {
+    const stored = Number(window.localStorage.getItem('mx-rma-device-pane-pct'))
+    return stored >= 15 && stored <= 70 ? stored : 30
+  })
+  const splitRef = React.useRef<HTMLDivElement | null>(null)
+  const devicePanePctRef = React.useRef(devicePanePct)
+  const resizingRef = React.useRef(false)
+  React.useEffect(() => { devicePanePctRef.current = devicePanePct }, [devicePanePct])
+  React.useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      if (!resizingRef.current || !splitRef.current) return
+      const rect = splitRef.current.getBoundingClientRect()
+      const pct = ((event.clientX - rect.left) / rect.width) * 100
+      setDevicePanePct(Math.min(70, Math.max(15, pct)))
+    }
+    const onUp = () => {
+      if (!resizingRef.current) return
+      resizingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.localStorage.setItem('mx-rma-device-pane-pct', String(Math.round(devicePanePctRef.current)))
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [])
+  const startResize = (event: React.MouseEvent) => {
+    event.preventDefault()
+    resizingRef.current = true
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
 
   // Unsaved changes dialog state
   const [unsavedOpen, setUnsavedOpen] = useState(false)
@@ -357,9 +395,7 @@ export default function App() {
     >
       {view === 'agentic' ? (
         <Stack spacing={2}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Typography variant='h4'>Agentic Scripting</Typography>
-          </Box>
+          <BrandHeader compact />
           <AgenticScriptPanel
             models={aiModels}
             prompts={systemPrompts}
@@ -376,9 +412,7 @@ export default function App() {
         </Stack>
       ) : (
       <Stack spacing={2}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
-            <Typography variant='h5'>PATROL Scripting KM File Based Configuration Editor</Typography>
-          </Box>
+          <BrandHeader />
 
         <Stack direction='row' spacing={1} alignItems='center' sx={{ flexWrap: 'wrap' }}>
           <Tooltip title='Load Configuration File'>
@@ -402,8 +436,15 @@ export default function App() {
           {filePath && <Typography sx={{ ml: 1 }} variant='body2' color='text.secondary' component='span'>{filePath}</Typography>}
         </Stack>
 
-        <Viewer raw={raw} onRawChange={(t: string) => { setRaw(t); /* mark dirty when raw edited */ (async () => { const { setDirty } = await import('../store/fbcskmSlice'); const { store } = await import('../store/store'); store.dispatch(setDirty(true)) })() }} />
+        <Tabs value={editorTab} onChange={(_, value) => setEditorTab(value)} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Tab value='manage' icon={<DnsIcon fontSize='small' />} iconPosition='start' label='Devices & Scripts' />
+          <Tab value='raw' icon={<DataObjectIcon fontSize='small' />} iconPosition='start' label='Raw Configuration' />
+        </Tabs>
 
+        {editorTab === 'raw' ? (
+          <Viewer raw={raw} onRawChange={(t: string) => { setRaw(t); /* mark dirty when raw edited */ (async () => { const { setDirty } = await import('../store/fbcskmSlice'); const { store } = await import('../store/store'); store.dispatch(setDirty(true)) })() }} />
+        ) : (
+        <>
         {/* Search area */}
         <Stack direction='row' spacing={1} alignItems='center'>
           <TextField
@@ -429,10 +470,31 @@ export default function App() {
         <Typography variant='body2' color='text.secondary'>Devices found: <strong>{devicesCount}</strong> • Scripts: <strong>{scriptsCount}</strong></Typography>
 
         {/* One clean device list — scripts shown on selection */}
-        <Stack direction='row' spacing={2}>
-          <DeviceList devices={displayDevices} fullDevices={devices} selectedId={selectedDeviceId} onSelect={(id: any) => requestSelectDevice(id)} onRequestEdit={(id) => { requestSelectDevice(id); setDeviceFormOpen(true) }} onPasteScript={(deviceId) => onPasteScriptToDevice(deviceId)} clipboard={clipboard} showDisabled={showDisabled} onToggleShowDisabled={() => setShowDisabled(!showDisabled)} />
-          <ScriptList deviceId={selectedDeviceId} selectedId={selectedScriptId} searchText={searchText} searchInScripts={searchInScripts} onSelect={(id: any) => requestSelectScript(id, selectedDeviceId)} onRequestEdit={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onSelectScript={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onCopyScript={onCopyScript} onCutScript={onCutScript} />
-        </Stack>
+        <Box ref={splitRef} sx={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
+          <Box sx={{ width: `calc(${devicePanePct}% - 3px)`, minWidth: 0, display: 'flex' }}>
+            <DeviceList devices={displayDevices} fullDevices={devices} selectedId={selectedDeviceId} onSelect={(id: any) => requestSelectDevice(id)} onRequestEdit={(id) => { requestSelectDevice(id); setDeviceFormOpen(true) }} onPasteScript={(deviceId) => onPasteScriptToDevice(deviceId)} clipboard={clipboard} showDisabled={showDisabled} onToggleShowDisabled={() => setShowDisabled(!showDisabled)} />
+          </Box>
+          <Box
+            onMouseDown={startResize}
+            role='separator'
+            aria-orientation='vertical'
+            title='Drag to resize'
+            sx={{
+              width: 6,
+              flexShrink: 0,
+              cursor: 'col-resize',
+              position: 'relative',
+              '&::after': { content: '""', position: 'absolute', top: 0, bottom: 0, left: '50%', width: '1px', transform: 'translateX(-50%)', backgroundColor: 'divider' },
+              '&:hover::after': { width: '3px', backgroundColor: 'primary.main' },
+              '&:active::after': { width: '3px', backgroundColor: 'primary.main' },
+            }}
+          />
+          <Box sx={{ flex: 1, minWidth: 0, display: 'flex', overflow: 'hidden' }}>
+            <ScriptList deviceId={selectedDeviceId} selectedId={selectedScriptId} searchText={searchText} searchInScripts={searchInScripts} onSelect={(id: any) => requestSelectScript(id, selectedDeviceId)} onRequestEdit={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onSelectScript={(scriptId, deviceId) => { requestSelectScript(scriptId, deviceId) }} onCopyScript={onCopyScript} onCutScript={onCutScript} />
+          </Box>
+        </Box>
+        </>
+        )}
 
         {selectedDevice && selectedScript && (
           <ScriptForm

@@ -204,10 +204,12 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   }
 
   return (
-    <Stack spacing={2} sx={{ flex: 4, minWidth: 900 }}>
-      <Typography variant='h6'>Scripts for: {dev.name}</Typography>
-      <FormControlLabel control={<Checkbox checked={isRestmon} onChange={e => setIsRestmon(e.target.checked)} />} label="Is Restmon Script" />
-      <Stack direction='row' spacing={1}>
+    <Stack spacing={2} sx={{ flex: 1, minWidth: 0, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, backgroundColor: 'background.paper' }}>
+      <Stack direction='row' alignItems='center' spacing={1}>
+        <Typography variant='h6' sx={{ flex: 1 }}>Scripts for: {dev.name}</Typography>
+      </Stack>
+      <Stack direction='row' spacing={1} alignItems='center' sx={{ flexWrap: 'wrap' }}>
+        <FormControlLabel sx={{ mr: 1, whiteSpace: 'nowrap' }} control={<Checkbox size='small' checked={isRestmon} onChange={e => setIsRestmon(e.target.checked)} />} label="Is Restmon Script" />
         <TextField label='Instance name' value={instanceName} onChange={e => setInstanceName(e.target.value)} />
         <TextField label='Script path' value={scriptPath} onChange={e => setScriptPath(e.target.value)} />
         <IconButton onClick={async () => {

@@ -4,11 +4,25 @@ import DashboardIcon from '@mui/icons-material/Dashboard'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import SettingsIcon from '@mui/icons-material/Settings'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import LightModeIcon from '@mui/icons-material/LightMode'
+import DarkModeIcon from '@mui/icons-material/DarkMode'
+import BrightnessAutoIcon from '@mui/icons-material/BrightnessAuto'
+import { useAppDispatch, useAppSelector } from '../store/store'
+import { setThemePreference } from '../store/fbcskmSlice'
+import type { ThemePreference } from '../theme'
 import BMCHelixLogo from '../../logo/BMCHelix Logo Medium Transparent.png'
 import MatrixLogo from '../../logo/Matrix-Logo-Flat.png'
 import MatrixKBLogo from '../../logo/MatrixKB for BMC Helix.png'
 
 export type AppView = 'editor' | 'agentic'
+
+const THEME_LABELS: Record<ThemePreference, string> = { light: 'Light', dark: 'Dark', system: 'System' }
+const THEME_NEXT: Record<ThemePreference, ThemePreference> = { light: 'dark', dark: 'system', system: 'light' }
+const THEME_ICONS: Record<ThemePreference, React.ReactNode> = {
+  light: <LightModeIcon fontSize='small' />,
+  dark: <DarkModeIcon fontSize='small' />,
+  system: <BrightnessAutoIcon fontSize='small' />,
+}
 
 export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHelp, electronAction, children }: {
   view: AppView
@@ -18,6 +32,9 @@ export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHel
   electronAction?: React.ReactNode
   children: React.ReactNode
 }) {
+  const dispatch = useAppDispatch()
+  const themePreference = useAppSelector(state => state.fbcskm.themePreference)
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <Box component='nav' sx={{
@@ -41,6 +58,12 @@ export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHel
         </Tooltip>
 
         <Divider sx={{ width: '60%', my: 1 }} />
+
+        <Tooltip title={`Theme: ${THEME_LABELS[themePreference]} — click for ${THEME_LABELS[THEME_NEXT[themePreference]]}`} placement='right'>
+          <IconButton onClick={() => dispatch(setThemePreference(THEME_NEXT[themePreference]))} aria-label='toggle color theme'>
+            {THEME_ICONS[themePreference]}
+          </IconButton>
+        </Tooltip>
 
         <Tooltip title='Settings' placement='right'>
           <IconButton onClick={onOpenSettings} aria-label='settings'>

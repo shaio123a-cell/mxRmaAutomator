@@ -8,7 +8,7 @@ export default defineConfig({
   //  CRITICAL FIX: Set root to the project base to resolve '/src/main.tsx'
   root: '.', 
   base: './',
-  server: { port: 5173 },
+  server: { port: 5175 },
   // Ensure build output is correct for the root
   build: { outDir: 'dist', emptyOutDir: true } 
 })

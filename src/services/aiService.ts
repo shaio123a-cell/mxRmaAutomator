@@ -73,25 +73,36 @@ function parseSuggestions(response: string): string[] {
 }
 
 function parseActionItems(value: unknown): string[] {
+  const clean = (raw: string) => raw
+    .trim()
+    .replace(/^[-*\u2022]+\s*|^\d+[.)]\s*/, '')
+    .replace(/^\*+|\*+$/g, '')
+    .trim()
   if (Array.isArray(value)) {
     return value
       .filter((item): item is string => typeof item === 'string')
-      .map(item => item.replace(/^[-*\u2022]\s*|^\d+[.)]\s*/, '').trim())
+      .map(clean)
       .filter(Boolean)
   }
   if (typeof value === 'string') {
     return value
       .split(/\r?\n/)
-      .map(line => line.replace(/^[-*\u2022]\s*|^\d+[.)]\s*/, '').trim())
+      .map(clean)
       .filter(Boolean)
   }
   return []
 }
 
 function parseActionItemsFromText(response: string): string[] {
-  const match = response.match(/^(?:ACTIONS_REQUIRED|SETUP_REQUIRED|SETUP_NOTES):\s*$([\s\S]*?)(?=^\s*[A-Z][A-Z_]*:|\s*```|$)/im)
+  const label = /^[ \t]*\*{0,2}[ \t]*(?:ACTIONS_REQUIRED|SETUP_REQUIRED|SETUP_NOTES)[ \t]*\*{0,2}[ \t]*:[ \t]*([^\n]*)/im
+  const match = label.exec(response)
   if (!match) return []
-  return parseActionItems(match[1])
+  const inline = match[1] ?? ''
+  const afterLabel = response.slice(match.index + match[0].length)
+  const stop = afterLabel.search(/\n[ \t]*\*{0,2}[ \t]*[A-Z][A-Z0-9_]*[ \t]*\*{0,2}[ \t]*:|```/)
+  const block = stop === -1 ? afterLabel : afterLabel.slice(0, stop)
+  const items = parseActionItems(`${inline}\n${block}`)
+  return items.filter(item => !/^(?:none|n\/?a|no(?:ne)? required|not required|[-*\u2022.\s]+)$/i.test(item.trim()))
 }
 
 function parseResponse(response: string): { script: string; suggestions: string[]; title: string; fileName: string; language: string; summary: string; actionsRequired: string[] } {
@@ -391,7 +402,7 @@ export async function generateScriptFromPrompt(
   const attemptedModels: string[] = []
   const failedModels: string[] = []
   const failures: string[] = []
-  const responseInstructions = `${systemPrompt}\n\nReturn a concise purpose-based title and a filename base that describes what the script does, not a copy of the user's request. Detect the language of the script you actually generate. Format your response as:\nSCRIPT_TITLE: concise human-readable title\nSCRIPT_NAME: short-purpose-based-filename-without-extension\nSCRIPT_LANGUAGE: language-name\nSCRIPT_SUMMARY: one or two sentences describing what the script does, what it connects to, and what it outputs. If this request modifies a previously generated script, describe what you changed or added instead.\nACTIONS_REQUIRED:\n- concrete step the user must do before this script can run (e.g. define credentials, edit a placeholder value, install a tool, grant permissions)\n- next step if any; omit this section entirely if nothing is required\nInclude the complete script in one fenced code block labelled with that language.\nNEXT_PROMPTS: ["first relevant follow-up", "second relevant follow-up", "third relevant follow-up"]\nDo not include an extension in SCRIPT_NAME; the application adds the extension from SCRIPT_LANGUAGE.`
+  const responseInstructions = `${systemPrompt}\n\nReturn a concise purpose-based title and a filename base that describes what the script does, not a copy of the user's request. Detect the language of the script you actually generate. Format your response as:\nSCRIPT_TITLE: concise human-readable title\nSCRIPT_NAME: short-purpose-based-filename-without-extension\nSCRIPT_LANGUAGE: language-name\nSCRIPT_SUMMARY: one or two sentences describing what the script does, what it connects to, and what it outputs. If this request modifies a previously generated script, describe what you changed or added instead.\nACTIONS_REQUIRED:\n- every manual step the user must take before this script can run: define or point to credentials/secrets and the file permissions or ACLs to apply, edit placeholder values, populate the list of objects/hosts/targets the script operates on, install required tools or modules, grant permissions or set the execution policy, and note the target/deployment path\n- this section is mandatory whenever the script reads any external value (a secret/credential file, an API key or token, a config file, a hardcoded path, a list of hosts/objects, or an installed tool); never leave such a requirement unlisted\n- one concrete prerequisite per line, written as an imperative instruction\n- output exactly "ACTIONS_REQUIRED: NONE" only when the script is fully self-contained and needs no manual setup whatsoever\nIn the script itself, start with a header comment block whose CONFIGURATION section documents every external value the user must provide: the credential/secret file path, the exact file format and the order of its fields, placeholder values to replace, the list of objects/hosts/targets, required tools/modules, and the file permissions/ACLs to set. Any value a user must supply or edit must be explained there, never left buried in the code.\nInclude the complete script in one fenced code block labelled with that language.\nNEXT_PROMPTS: ["first relevant follow-up", "second relevant follow-up", "third relevant follow-up"]\nDo not include an extension in SCRIPT_NAME; the application adds the extension from SCRIPT_LANGUAGE.`
   for (const model of chain) {
     attemptedModels.push(model.name)
     try {

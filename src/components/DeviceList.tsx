@@ -151,14 +151,14 @@ export default function DeviceList({ devices: devicesProp, fullDevices: fullDevi
   }
 
   return (
-    <Stack spacing={2} sx={{ flex: 1, minWidth: 360 }}>
+    <Stack spacing={2} sx={{ flex: 1, minWidth: 0, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 2, backgroundColor: 'background.paper' }}>
       <Stack direction='row' alignItems='center' spacing={1}>
-        <Typography variant='h6'>Devices</Typography>
+        <Typography variant='h6' sx={{ flex: 1 }}>Devices</Typography>
         <IconButton size='small' onClick={(e) => setGlobalMenuAnchor(e.currentTarget)} aria-label='device options'>
           <MoreVertIcon />
         </IconButton>
       </Stack>
-      <Stack direction='row' spacing={1}>
+      <Stack direction='row' spacing={1} sx={{ flexWrap: 'wrap' }}>
         <TextField label='Device name' value={name} onChange={e => setName(e.target.value)} />
         <TextField label='Forced IP (optional)' value={forcedIp} onChange={e => setForcedIp(e.target.value)} />
         <Tooltip title='Add device'>
