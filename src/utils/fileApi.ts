@@ -6,6 +6,7 @@ export interface PersistedAISettings {
   prompts: AISystemPrompt[]
   activePromptId: string | null
   themePreference?: ThemePreference
+  configPromptContentHashes?: Record<string, string>
 }
 
 export interface AgenticChatMessage {

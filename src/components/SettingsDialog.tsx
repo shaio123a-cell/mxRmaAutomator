@@ -28,6 +28,7 @@ import AutorenewIcon from '@mui/icons-material/Autorenew'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
+import RestoreIcon from '@mui/icons-material/Restore'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import {
   setActiveSystemPromptId,
@@ -38,6 +39,7 @@ import {
   setThemePreference,
 } from '../store/fbcskmSlice'
 import type { AIModelConfig, AISystemPrompt } from '../config'
+import config from '../config'
 import type { DefaultScriptSettings } from '../store/fbcskmSlice'
 import type { ThemePreference } from '../theme'
 import { fetchProviderModels, testAiModel } from '../services/aiService'
@@ -141,7 +143,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     setTheme(currentThemePreference)
   }, [open, defaults, scriptDefaults, aiModels, systemPrompts, activeSystemPromptId, currentThemePreference])
 
-  const isDirty = () => (
+  const isConfigDirty = () => (
     (defaults.port ?? null) !== (port ?? null)
     || (defaults.connectionTimeoutMs ?? null) !== (timeoutMs ?? null)
     || (defaults.connectionPollSec ?? null) !== (pollSec ?? null)
@@ -158,11 +160,34 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     || JSON.stringify(prompts) !== JSON.stringify(systemPrompts)
     || activePromptId !== activeSystemPromptId
     || Boolean(modelDraft.name || modelDraft.model || modelDraft.apiKey || modelDraft.baseUrl !== 'https://api.openai.com/v1')
-    || Boolean(promptDraft.name || promptDraft.content)
     || theme !== currentThemePreference
   )
 
-  const save = () => {
+  const isPromptDraftDirty = () => {
+    if (!promptDraft.name.trim() && !promptDraft.content.trim()) return false
+    if (!promptDraft.id) return true
+    const saved = prompts.find(prompt => prompt.id === promptDraft.id)
+    return !saved || saved.name !== promptDraft.name || saved.content !== promptDraft.content
+  }
+
+  const isDirty = () => isConfigDirty() || isPromptDraftDirty()
+
+  const resolveActivePromptId = (list: AISystemPrompt[], current: string | null): string | null => {
+    if (current && list.some(prompt => prompt.id === current)) return current
+    const configDefaultId = config.ai?.activeSystemPromptId ?? null
+    if (configDefaultId && list.some(prompt => prompt.id === configDefaultId)) return configDefaultId
+    return list[0]?.id ?? null
+  }
+
+  const save = (includePromptDraft: boolean) => {
+    let nextPrompts = prompts
+    if (includePromptDraft && isPromptDraftDirty()) {
+      const prompt = { ...promptDraft, id: promptDraft.id || `prompt-${Date.now()}`, name: promptDraft.name.trim() || 'Untitled prompt' }
+      nextPrompts = prompts.some(item => item.id === prompt.id)
+        ? prompts.map(item => item.id === prompt.id ? prompt : item)
+        : [...prompts, prompt]
+    }
+    const nextActivePromptId = resolveActivePromptId(nextPrompts, activePromptId)
     dispatch(setDefaultDeviceSettings({
       port: port === '' || port === null ? null : Number(port),
       connectionTimeoutMs: timeoutMs === '' || timeoutMs === null ? null : Number(timeoutMs),
@@ -180,8 +205,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
       maxBackups: Number(maxBackups),
     }))
     dispatch(setAiModels(models))
-    dispatch(setSystemPrompts(prompts))
-    dispatch(setActiveSystemPromptId(activePromptId))
+    dispatch(setSystemPrompts(nextPrompts))
+    dispatch(setActiveSystemPromptId(nextActivePromptId))
     dispatch(setThemePreference(theme))
     setConfirmOpen(false)
     onClose()
@@ -195,6 +220,17 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
   const discardAndClose = () => {
     setConfirmOpen(false)
     onClose()
+  }
+
+  const restoreConfigPromptDefaults = () => {
+    const configPrompts = config.ai?.systemPrompts ?? []
+    if (!configPrompts.length) return
+    setPrompts(current => {
+      const byId = new Map(current.map(prompt => [prompt.id, prompt]))
+      for (const configPrompt of configPrompts) byId.set(configPrompt.id, { ...configPrompt })
+      return [...byId.values()]
+    })
+    setPromptDraft(newPrompt())
   }
 
   const saveModel = () => {
@@ -277,12 +313,11 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
   const savePrompt = () => {
     if (!promptDraft.name.trim() || !promptDraft.content.trim()) return
     const prompt = { ...promptDraft, id: promptDraft.id || `prompt-${Date.now()}` }
-    setPrompts(current => {
-      const index = current.findIndex(item => item.id === prompt.id)
-      if (index < 0) return [...current, prompt]
-      return current.map(item => item.id === prompt.id ? prompt : item)
-    })
-    if (!activePromptId) setActivePromptId(prompt.id)
+    const next = prompts.some(item => item.id === prompt.id)
+      ? prompts.map(item => item.id === prompt.id ? prompt : item)
+      : [...prompts, prompt]
+    setPrompts(next)
+    setActivePromptId(resolveActivePromptId(next, activePromptId))
     setPromptDraft(newPrompt())
   }
 
@@ -438,6 +473,11 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
               <AccordionDetails>
                 <Stack spacing={1.5}>
                   <Typography variant='body2' color='text.secondary'>The active system prompt is sent with each user request to the model chain.</Typography>
+                  <Box>
+                    <Tooltip title='Replaces prompts that came from config.json with the bundled defaults. Your own extra prompts are kept. Apply with Save Changes.'>
+                      <Button size='small' startIcon={<RestoreIcon fontSize='small' />} onClick={restoreConfigPromptDefaults}>Restore system defaults</Button>
+                    </Tooltip>
+                  </Box>
                   {prompts.map(prompt => (
                     <Box key={prompt.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                       <Button size='small' variant={activePromptId === prompt.id ? 'contained' : 'outlined'} onClick={() => setActivePromptId(prompt.id)}>{activePromptId === prompt.id ? 'Active' : 'Use'}</Button>
@@ -467,17 +507,32 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
         </DialogContent>
         <DialogActions>
           <Button onClick={requestClose}>Cancel</Button>
-          <Button variant='contained' onClick={save}>Save Changes</Button>
+          <Button variant='contained' onClick={() => { if (isPromptDraftDirty()) setConfirmOpen(true); else save(false) }}>Save Changes</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <DialogTitle>Unsaved changes</DialogTitle>
-        <DialogContent><Typography>Discard the configuration changes made in this dialog?</Typography></DialogContent>
+        <DialogContent>
+          <Stack spacing={1}>
+            {isPromptDraftDirty() && (
+              <Typography>
+                A system prompt edit ({promptDraft.name.trim() || 'Untitled prompt'}) has not been applied yet — it is only stored when you press &quot;Save Prompt&quot;.
+              </Typography>
+            )}
+            <Typography>
+              {isConfigDirty()
+                ? (isPromptDraftDirty()
+                  ? 'There are also other unsaved configuration changes. Save the prompt edit together with the other changes?'
+                  : 'Discard the configuration changes made in this dialog?')
+                : 'Save the prompt edit now?'}
+            </Typography>
+          </Stack>
+        </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>Continue editing</Button>
           <Button color='error' onClick={discardAndClose}>Discard Changes</Button>
-          <Button variant='contained' onClick={save}>Save Changes</Button>
+          <Button variant='contained' onClick={() => save(isPromptDraftDirty())}>{isPromptDraftDirty() ? 'Save prompt & changes' : 'Save Changes'}</Button>
         </DialogActions>
       </Dialog>
     </>

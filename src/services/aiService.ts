@@ -1,4 +1,5 @@
 import type { AIModelConfig as ConfigAIModelConfig, AISystemPrompt as ConfigAISystemPrompt } from '../config'
+import config from '../config'
 
 export type AiProvider = ConfigAIModelConfig['provider']
 export type AiModelConfig = ConfigAIModelConfig
@@ -32,7 +33,9 @@ export class AiGenerationError extends Error {
 }
 
 export function getActiveSystemPrompt(systemPrompts: AiSystemPrompt[] = [], activePromptId?: string | null): string {
-  const selected = systemPrompts.find(prompt => prompt.id === activePromptId) ?? systemPrompts[0]
+  const selected = systemPrompts.find(prompt => prompt.id === activePromptId)
+    ?? systemPrompts.find(prompt => prompt.id === config.ai?.activeSystemPromptId)
+    ?? systemPrompts[0]
   return selected?.content || 'You are a senior infrastructure automation engineer. Produce readable, production-safe scripts with clear comments and input validation.'
 }
 
