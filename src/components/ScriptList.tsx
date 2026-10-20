@@ -20,8 +20,9 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import DryRunResultsDialog, { DryRunResults } from './DryRunResultsDialog'
-import { buildDryRunCommands } from '../utils/scriptArgs'
+import RunDialog, { RunDialogScript } from './RunDialog'
+import { buildEncodedArgs, decodeBmcPlaceholders } from '../utils/scriptArgs'
+import { hashScriptContent } from '../utils/contentHash'
 
 function SortableScriptItem({ s, idx, isSelected, onSelect, onSelectScript, dev, openMenu }: { s: any, idx: number, isSelected: boolean, onSelect: (id: string | null) => void, onSelectScript?: (id: string, deviceId: string) => void, dev: any, openMenu: (e: React.MouseEvent<HTMLElement>, id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id })
@@ -112,8 +113,8 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
   // menu state
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuScriptId, setMenuScriptId] = useState<string | null>(null)
-  const [dryRunOpen, setDryRunOpen] = useState(false)
-  const [dryRunResults, setDryRunResults] = useState<DryRunResults | null>(null)
+  const [runOpen, setRunOpen] = useState(false)
+  const [runScript, setRunScript] = useState<RunDialogScript | null>(null)
 
   const openMenu = (e: React.MouseEvent<HTMLElement>, id: string) => { e.stopPropagation(); setMenuAnchor(e.currentTarget); setMenuScriptId(id) }
   const closeMenu = () => { setMenuAnchor(null); setMenuScriptId(null) }
@@ -122,19 +123,26 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
     const s = dev?.scripts.find(x => x.id === scriptId)
     if (!s) return
 
-    const { originalCommand, command } = buildDryRunCommands(s)
-
-    let results = '(placeholder - command not executed)'
-    if (window.electronAPI?.runCommand) {
-      try {
-        const res = await window.electronAPI.runCommand(command)
-        results = res.error ? `Error: ${res.error}\nStdout: ${res.stdout}\nStderr: ${res.stderr}` : `Stdout: ${res.stdout}\nStderr: ${res.stderr}`
-      } catch (e) {
-        results = `Failed to run: ${e}`
-      }
+    const fileName = s.scriptPath.split(/[\\/]/).pop() || s.scriptPath || 'script.ps1'
+    const args = s.isRestmon ? decodeBmcPlaceholders(buildEncodedArgs(s)) : ` ${s.args || ''}`
+    let content: string | undefined
+    try {
+      content = await window.electronAPI.readFile(s.scriptPath)
+    } catch {
+      content = undefined
     }
-    setDryRunResults({ command, originalCommand, results })
-    setDryRunOpen(true)
+    setRunScript({
+      key: `instance:${dev?.id}:${s.id}`,
+      name: fileName,
+      content,
+      contentHash: content ? hashScriptContent(content) : s.contentHash,
+      versionId: s.id,
+      sourceKind: 'saved-instance',
+      args: args.trim(),
+      isRestmon: s.isRestmon,
+      localPath: s.scriptPath,
+    })
+    setRunOpen(true)
   }
 
   const onEdit = (id: string) => {
@@ -245,13 +253,13 @@ export default function ScriptList({ deviceId, selectedId, onSelect, onRequestEd
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
         <MenuItem onClick={() => { if (menuScriptId) onEdit(menuScriptId); closeMenu() }}><DriveFileRenameOutlineIcon fontSize='small' sx={{ mr: 1 }} />Edit</MenuItem>
         <MenuItem onClick={() => { if (menuScriptId) duplicate(menuScriptId); closeMenu() }}><FileCopyOutlinedIcon fontSize='small' sx={{ mr: 1 }} />Duplicate</MenuItem>
-        <MenuItem onClick={() => { if (menuScriptId) dryRun(menuScriptId); closeMenu() }}><ScienceIcon fontSize='small' sx={{ mr: 1 }} />Dry Run</MenuItem>
+        <MenuItem onClick={() => { if (menuScriptId) dryRun(menuScriptId); closeMenu() }}><ScienceIcon fontSize='small' sx={{ mr: 1 }} />Run…</MenuItem>
         <MenuItem onClick={() => { if (menuScriptId && onCopyScript && deviceId) onCopyScript(menuScriptId, deviceId); closeMenu() }}><ContentCopyIcon fontSize='small' sx={{ mr: 1 }} />Copy</MenuItem>
         <MenuItem onClick={() => { if (menuScriptId && onCutScript && deviceId) onCutScript(menuScriptId, deviceId); closeMenu() }}><ContentCutIcon fontSize='small' sx={{ mr: 1 }} />Cut</MenuItem>
         <MenuItem onClick={() => { if (menuScriptId) remove(menuScriptId); closeMenu() }} sx={{ color: 'error.main' }}><DeleteOutlineIcon fontSize='small' sx={{ mr: 1 }} />Delete</MenuItem>
       </Menu>
 
-      <DryRunResultsDialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} results={dryRunResults} />
+      <RunDialog open={runOpen} onClose={() => setRunOpen(false)} script={runScript} />
     </Stack>
   )
 }

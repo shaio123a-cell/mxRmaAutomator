@@ -2,6 +2,7 @@ import React from 'react'
 import { Box, Divider, IconButton, Tooltip, Typography } from '@mui/material'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
+import DnsIcon from '@mui/icons-material/Dns'
 import SettingsIcon from '@mui/icons-material/Settings'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import LightModeIcon from '@mui/icons-material/LightMode'
@@ -14,7 +15,7 @@ import BMCHelixLogo from '../../logo/BMCHelix Logo Medium Transparent.png'
 import MatrixLogo from '../../logo/Matrix-Logo-Flat.png'
 import MatrixKBLogo from '../../logo/MatrixKB for BMC Helix.png'
 
-export type AppView = 'editor' | 'agentic'
+export type AppView = 'editor' | 'agentic' | 'hosts'
 
 const THEME_LABELS: Record<ThemePreference, string> = { light: 'Light', dark: 'Dark', system: 'System' }
 const THEME_NEXT: Record<ThemePreference, ThemePreference> = { light: 'dark', dark: 'system', system: 'light' }
@@ -54,6 +55,11 @@ export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHel
         <Tooltip title='Agentic Scripting' placement='right'>
           <IconButton color={view === 'agentic' ? 'primary' : 'default'} onClick={() => onViewChange('agentic')} aria-label='agentic scripting'>
             <SmartToyIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title='Execution Hosts' placement='right'>
+          <IconButton color={view === 'hosts' ? 'primary' : 'default'} onClick={() => onViewChange('hosts')} aria-label='execution hosts'>
+            <DnsIcon />
           </IconButton>
         </Tooltip>
 

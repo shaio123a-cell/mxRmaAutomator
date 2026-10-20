@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const { registerRemoteIpc } = require('./remote');
 const APP_DATA_FOLDER = 'mxRestmonSuperSonic';
 
 function getPersistentDataDirectory() {
@@ -70,6 +71,7 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     await migrateLegacyAppData()
+    registerRemoteIpc({ ipcMain, basePath: getPersistentDataDirectory() })
     createWindow()
   })
 }
@@ -113,6 +115,14 @@ app.on('activate', () => {
 });
 
 // IPC handlers
+function prepareNativeDialog() {
+  if (!mainWindow || mainWindow.isDestroyed()) return undefined;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+  return mainWindow;
+}
+
 function refocusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -122,17 +132,48 @@ function refocusMainWindow() {
   }
 }
 
+async function showNativeOpenDialog(options) {
+  const parent = prepareNativeDialog();
+  if (process.platform === 'win32') {
+    const filePaths = parent
+      ? dialog.showOpenDialogSync(parent, options)
+      : dialog.showOpenDialogSync(options);
+    refocusMainWindow();
+    return { canceled: !filePaths || filePaths.length === 0, filePaths: filePaths || [] };
+  }
+  const result = parent
+    ? await dialog.showOpenDialog(parent, options)
+    : await dialog.showOpenDialog(options);
+  refocusMainWindow();
+  return result;
+}
+
+async function showNativeSaveDialog(options) {
+  const parent = prepareNativeDialog();
+  if (process.platform === 'win32') {
+    const filePath = parent
+      ? dialog.showSaveDialogSync(parent, options)
+      : dialog.showSaveDialogSync(options);
+    refocusMainWindow();
+    return { canceled: !filePath, filePath: filePath || '' };
+  }
+  const result = parent
+    ? await dialog.showSaveDialog(parent, options)
+    : await dialog.showSaveDialog(options);
+  refocusMainWindow();
+  return result;
+}
+
 ipcMain.handle('open-file', async (event, filter) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await showNativeOpenDialog({
     properties: ['openFile'],
     filters: filter ? [filter] : [{ name: 'Text Files', extensions: ['txt', 'cfg', 'config'] }],
   });
-  refocusMainWindow();
   return result.canceled ? null : result.filePaths[0];
 });
 
 ipcMain.handle('save-file', async (event, suggestedName) => {
-  const result = await dialog.showSaveDialog(mainWindow, {
+  const result = await showNativeSaveDialog({
     defaultPath: suggestedName,
     filters: [
       { name: 'Scripts', extensions: ['sh', 'ps1', 'bat', 'cmd', 'py'] },
@@ -140,7 +181,6 @@ ipcMain.handle('save-file', async (event, suggestedName) => {
       { name: 'All Files', extensions: ['*'] },
     ],
   });
-  refocusMainWindow();
   return result.canceled ? null : result.filePath;
 });
 
@@ -308,11 +348,10 @@ ipcMain.handle('select-path', async (event, options) => {
   if (options?.file) properties.push('openFile')
   if (properties.length === 0) properties.push('openFile') // default
 
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await showNativeOpenDialog({
     properties: properties,
     filters: options?.filters || []
   })
-  refocusMainWindow();
   return result.canceled ? null : result.filePaths[0];
 })
 

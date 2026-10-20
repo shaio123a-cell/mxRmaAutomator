@@ -9,6 +9,14 @@ import config from '../config'
 export const store = configureStore({ reducer: { fbcskm } })
 
 const aiSettingsStorageKey = 'mx-rma-agentic-ai-settings'
+const legacyDefaultPrompts: Record<string, string[]> = {
+	'system-default': [
+		`You are a senior infrastructure automation engineer. Produce valid, production-safe scripts for Linux and Windows environments. Keep scripts readable, well-commented, and practical for real-world administration tasks. Return the complete script in a fenced code block, with a concise explanation outside it.`,
+	],
+	'system-restmon': [
+		`You are generating PATROL KM / RestMon automation scripts. Follow the user's requested language and existing script conventions. Keep commands readable, validate inputs, handle errors, and return the complete script in a fenced code block.`,
+	],
+}
 let aiSettingsPersistenceReady = false
 let lastAiSettingsSnapshot = ''
 let queuedElectronSave = Promise.resolve()
@@ -59,6 +67,11 @@ function applyAISettings(settings: PersistedAISettings) {
 	if (settings.themePreference) store.dispatch(setThemePreference(settings.themePreference))
 }
 
+function isLegacyDefaultPrompt(id: string, content: string): boolean {
+	const normalized = content.trim()
+	return (legacyDefaultPrompts[id] ?? []).some(item => item.trim() === normalized)
+}
+
 function mergeConfigPromptDefaults(settings: PersistedAISettings): PersistedAISettings {
 	const configPrompts = config.ai?.systemPrompts ?? []
 	if (!configPrompts.length) return settings
@@ -75,7 +88,9 @@ function mergeConfigPromptDefaults(settings: PersistedAISettings): PersistedAISe
 			continue
 		}
 		const recordedHash = recorded[configPrompt.id]
-		const unmodified = recordedHash !== undefined && recordedHash === hashText(prompts[index].content)
+		const unmodified = recordedHash !== undefined
+			? recordedHash === hashText(prompts[index].content)
+			: isLegacyDefaultPrompt(configPrompt.id, prompts[index].content)
 		if (unmodified && prompts[index].content !== configPrompt.content) {
 			prompts[index] = { ...configPrompt }
 			changed = true
@@ -106,7 +121,9 @@ export const aiSettingsReady = (async () => {
 	}
 
 	let mergedSettings: PersistedAISettings | null = null
+	let needsHashMigration = false
 	if (savedSettings) {
+		needsHashMigration = Object.keys(savedSettings.configPromptContentHashes ?? {}).length === 0
 		mergedSettings = mergeConfigPromptDefaults(savedSettings)
 		applyAISettings(mergedSettings)
 	}
@@ -114,7 +131,7 @@ export const aiSettingsReady = (async () => {
 	lastAiSettingsSnapshot = JSON.stringify(getCurrentAISettings())
 	if (!savedSettings && window.electronAPI.isElectron) {
 		await window.electronAPI.saveAiSettings(getCurrentAISettings())
-	} else if (mergedSettings && mergedSettings !== savedSettings) {
+	} else if (mergedSettings && (mergedSettings !== savedSettings || needsHashMigration)) {
 		try {
 			const fresh = getCurrentAISettings()
 			if (window.electronAPI.isElectron) await window.electronAPI.saveAiSettings(fresh)

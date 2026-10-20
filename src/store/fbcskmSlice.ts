@@ -29,6 +29,8 @@ export interface ScriptInstance {
   timeoutSec?: number
   regexField?: string
   isRestmon?: boolean
+  contentHash?: string
+  lastVerified?: { hostId: string; hash: string; at: string }
   dirty?: boolean
   validationErrors?: string[]
   [key: string]: any

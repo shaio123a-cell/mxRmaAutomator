@@ -1,5 +1,6 @@
 import type { AIModelConfig as ConfigAIModelConfig, AISystemPrompt as ConfigAISystemPrompt } from '../config'
 import config from '../config'
+import { hashScriptContent } from '../utils/contentHash'
 
 export type AiProvider = ConfigAIModelConfig['provider']
 export type AiModelConfig = ConfigAIModelConfig
@@ -15,6 +16,8 @@ export interface AiGeneratedScript {
   createdAt: string
   summary?: string
   actionsRequired?: string[]
+  contentHash?: string
+  lastVerified?: string
 }
 
 export interface AiConversationTurn {
@@ -445,6 +448,7 @@ export async function generateScriptFromPrompt(
           createdAt: new Date().toISOString(),
           summary: parsed.summary,
           actionsRequired: parsed.actionsRequired,
+          contentHash: hashScriptContent(parsed.script),
         },
         suggestions,
         usedFallback: attemptedModels.length > 1,

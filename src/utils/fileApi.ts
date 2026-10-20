@@ -1,5 +1,6 @@
 import type { AIModelConfig, AISystemPrompt } from '../config'
 import type { ThemePreference } from '../theme'
+import type { RemoteBridge } from '../services/remoteTypes'
 
 export interface PersistedAISettings {
   models: AIModelConfig[]
@@ -32,6 +33,8 @@ export interface AgenticChatRecord {
     createdAt: string
     summary?: string
     actionsRequired?: string[]
+    contentHash?: string
+    lastVerified?: string
   } | null
   generatedScripts: {
     id: string
@@ -43,6 +46,8 @@ export interface AgenticChatRecord {
     createdAt: string
     summary?: string
     actionsRequired?: string[]
+    contentHash?: string
+    lastVerified?: string
   }[]
   suggestions: string[]
   scriptName: string
@@ -173,10 +178,26 @@ export const fileApi = {
     window.open(url, '_blank');
   },
   isElectron: false,
+  tempDir: '',
   listAgenticChats: async (): Promise<AgenticChatRecord[]> => [],
   loadAgenticChat: async (_id: string): Promise<AgenticChatRecord | null> => null,
   saveAgenticChat: async (_chat: AgenticChatRecord): Promise<void> => {},
   deleteAgenticChat: async (_id: string): Promise<void> => {},
+  remote: {
+    available: false,
+    listInventory: async () => ({ hosts: [], profiles: [] }),
+    saveHost: async () => { throw new Error('Execution hosts are only available in the desktop app.') },
+    deleteHost: async () => {},
+    saveProfile: async () => { throw new Error('Credential profiles are only available in the desktop app.') },
+    deleteProfile: async () => {},
+    setSecret: async () => { throw new Error('Credential storage is only available in the desktop app.') },
+    clearSecret: async () => {},
+    testConnection: async () => ({ ok: false, message: 'Remote execution is only available in the desktop app.' }),
+    run: async () => { throw new Error('Remote execution is only available in the desktop app.') },
+    cancel: async () => {},
+    onOutput: () => () => {},
+    listAudit: async () => [],
+  } as RemoteBridge,
   loadAiSettings: async (): Promise<PersistedAISettings | null> => null,
   saveAiSettings: async (_settings: PersistedAISettings): Promise<void> => {},
   selectPath: async (options?: { directory?: boolean, file?: boolean, filters?: any[] }): Promise<string | null> => {

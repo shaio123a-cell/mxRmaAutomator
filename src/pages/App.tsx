@@ -13,6 +13,7 @@ import ErrorBoundary from '../components/ErrorBoundary'
 import SettingsDialog from '../components/SettingsDialog'
 import HelpDialog from '../components/HelpDialog'
 import AgenticScriptPanel from '../components/AgenticScriptPanel'
+import ExecutionHostsView from '../components/ExecutionHostsView'
 import AppShell, { AppView } from '../components/AppShell'
 import BrandHeader from '../components/BrandHeader'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
@@ -401,7 +402,12 @@ export default function App() {
         </Tooltip>
       )}
     >
-      {view === 'agentic' ? (
+      {view === 'hosts' ? (
+        <Stack spacing={2}>
+          <BrandHeader compact />
+          <ExecutionHostsView devices={devices} />
+        </Stack>
+      ) : view === 'agentic' ? (
         <Stack spacing={2}>
           <BrandHeader compact />
           <AgenticScriptPanel

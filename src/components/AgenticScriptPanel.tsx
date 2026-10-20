@@ -45,6 +45,8 @@ import { addAgenticScript, addScript, setAiModels } from '../store/fbcskmSlice'
 import { AiGenerationError, getActiveSystemPrompt, generateMoreSuggestions, generateScriptFromPrompt, type AiGeneratedScript, type AiModelConfig, type AiSystemPrompt } from '../services/aiService'
 import { deleteAgenticChat, listAgenticChats, loadAgenticChat, saveAgenticChat } from '../services/chatStorage'
 import type { AgenticChatMessage, AgenticChatRecord } from '../utils/fileApi'
+import RunDialog, { RunDialogScript } from './RunDialog'
+import { hashScriptContent, shortHash } from '../utils/contentHash'
 
 type ChatMessage = AgenticChatMessage
 
@@ -105,6 +107,8 @@ export default function AgenticScriptPanel({
   const [statusText, setStatusText] = useState('Describe the script you want to create.')
   const [showTestOutput, setShowTestOutput] = useState(false)
   const [testOutput, setTestOutput] = useState('')
+  const [runOpen, setRunOpen] = useState(false)
+  const [runScript, setRunScript] = useState<RunDialogScript | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [targetDeviceId, setTargetDeviceId] = useState('')
@@ -480,9 +484,10 @@ export default function AgenticScriptPanel({
   const updateScript = (content: string) => {
     setLastChatActivityAt(new Date().toISOString())
     setSavedPath(null)
-    setGeneratedScript(current => current ? { ...current, content } : current)
+    const contentHash = hashScriptContent(content)
+    setGeneratedScript(current => current ? { ...current, content, contentHash } : current)
     setGeneratedScripts(current => generatedScript
-      ? current.map(script => script.id === generatedScript.id ? { ...script, content } : script)
+      ? current.map(script => script.id === generatedScript.id ? { ...script, content, contentHash } : script)
       : current)
   }
 
@@ -554,6 +559,7 @@ export default function AgenticScriptPanel({
           pollIntervalSec: 300,
           timeoutSec: 30,
           isRestmon: false,
+          contentHash: generatedScript.contentHash || hashScriptContent(generatedScript.content),
         },
       }))
       setStatusText(`Added ${instanceName} to ${device.name}. Continue editing it below.`)
@@ -566,32 +572,17 @@ export default function AgenticScriptPanel({
 
   const testScript = async () => {
     if (!generatedScript) return
-    if (!window.electronAPI.isElectron) {
-      setTestOutput('Test execution is available in Electron mode. Save or download the script to run it in a local shell.')
-      setLastChatActivityAt(new Date().toISOString())
-      return
-    }
-    if (!window.confirm('Run this generated script on this computer? Review the script before continuing.')) return
-
     setLastChatActivityAt(new Date().toISOString())
-    setTestOutput('Running script...')
-    setShowTestOutput(true)
-    try {
-      const isPowerShell = scriptName.toLowerCase().endsWith('.ps1')
-      const result = isPowerShell
-        ? await window.electronAPI.encodeScript(generatedScript.content)
-        : await window.electronAPI.runCommand(generatedScript.content)
-      setTestOutput(result.error
-        ? `Error: ${result.error}\nStdout:\n${result.stdout}\nStderr:\n${result.stderr}`
-        : `Stdout:\n${result.stdout}\nStderr:\n${result.stderr}`)
-      setStatusText('Script test run finished.')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Script test failed.'
-      setTestOutput(message)
-      setStatusText(message)
-    } finally {
-      setIsGenerating(false)
-    }
+    setRunScript({
+      key: `agentic:${generatedScript.id}`,
+      name: scriptName || generatedScript.name,
+      content: generatedScript.content,
+      contentHash: generatedScript.contentHash || hashScriptContent(generatedScript.content),
+      versionId: generatedScript.id,
+      sourceKind: 'agentic-version',
+      isRestmon: false,
+    })
+    setRunOpen(true)
   }
 
   const enabledModelCount = models.filter(model => model.enabled).length
@@ -798,10 +789,7 @@ export default function AgenticScriptPanel({
           </Tooltip>
           <Tooltip title='Test run script'>
             <span>
-              <IconButton onClick={() => {
-                void testScript()
-                setShowTestOutput(true)
-              }} disabled={!generatedScript} aria-label='test run script'
+              <IconButton onClick={() => void testScript()} disabled={!generatedScript} aria-label='test run script'
                 sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, width: 40, height: 40 }}>
                 <PlayArrowIcon fontSize='small' />
               </IconButton>
@@ -889,7 +877,7 @@ export default function AgenticScriptPanel({
           fullWidth
         >
           {generatedScripts.map((script, index) => (
-            <MenuItem key={script.id} value={script.id}>{index + 1}. {script.name} · {script.modelName}</MenuItem>
+            <MenuItem key={script.id} value={script.id}>{index + 1}. {script.name} · {script.modelName} · {shortHash(script.contentHash) || 'no hash'}</MenuItem>
           ))}
         </TextField>
         <Divider />
@@ -936,6 +924,7 @@ export default function AgenticScriptPanel({
 
       </Stack>
       </Box>
+      <RunDialog open={runOpen} onClose={() => setRunOpen(false)} script={runScript} />
       <Dialog open={renameDialogOpen} onClose={() => setRenameDialogOpen(false)} maxWidth='xs' fullWidth>
         <DialogTitle>Rename chat</DialogTitle>
         <DialogContent>

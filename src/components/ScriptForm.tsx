@@ -12,9 +12,10 @@ import { useAppDispatch } from '../store/store'
 import config, { FieldConfig } from '../config'
 import { TimePicker } from '@mui/x-date-pickers'
 import dayjs from 'dayjs'
-import DryRunResultsDialog, { DryRunResults } from './DryRunResultsDialog'
+import RunDialog, { RunDialogScript } from './RunDialog'
 import PayloadEditor, { minifyPayload } from './PayloadEditor'
-import { buildDryRunCommands, buildEncodedArgs } from '../utils/scriptArgs'
+import { buildEncodedArgs, decodeBmcPlaceholders } from '../utils/scriptArgs'
+import { hashScriptContent } from '../utils/contentHash'
 
 export type ScriptFormHandle = {
   isDirty: () => boolean
@@ -69,8 +70,8 @@ export default forwardRef<ScriptFormHandle, Props>(
   function ScriptForm({ open, device, script, onChange, onClose }, ref) {
     const dispatch = useAppDispatch()
     const [draft, setDraft] = useState<ScriptInstance>(script)
-    const [dryRunOpen, setDryRunOpen] = useState(false)
-    const [dryRunResults, setDryRunResults] = useState<DryRunResults | null>(null)
+    const [runOpen, setRunOpen] = useState(false)
+    const [runScript, setRunScript] = useState<RunDialogScript | null>(null)
 
     const [headersError, setHeadersError] = useState(false)
     const [payloadError, setPayloadError] = useState(false)
@@ -205,20 +206,26 @@ export default forwardRef<ScriptFormHandle, Props>(
     }
 
     const runDryRun = async () => {
-      const { originalCommand, command } = buildDryRunCommands(draft)
-      let results = ''
-      if (window.electronAPI?.runCommand) {
-        try {
-          const res = await window.electronAPI.runCommand(command)
-          results = res.error ? `Error: ${res.error}\nStdout: ${res.stdout}\nStderr: ${res.stderr}` : `Stdout: ${res.stdout}\nStderr: ${res.stderr}`
-        } catch (e) {
-          results = `Failed to run: ${e}`
-        }
-      } else {
-        results = 'Dry run is only available in the Electron app.'
+      const fileName = draft.scriptPath.split(/[\\/]/).pop() || draft.scriptPath || 'script.ps1'
+      const args = draft.isRestmon ? decodeBmcPlaceholders(buildEncodedArgs(draft)) : ` ${draft.args || ''}`
+      let content: string | undefined
+      try {
+        content = await window.electronAPI.readFile(draft.scriptPath)
+      } catch {
+        content = undefined
       }
-      setDryRunResults({ command, originalCommand, results })
-      setDryRunOpen(true)
+      setRunScript({
+        key: `instance:${device.id}:${draft.id}`,
+        name: fileName,
+        content,
+        contentHash: content ? hashScriptContent(content) : draft.contentHash,
+        versionId: draft.id,
+        sourceKind: 'saved-instance',
+        args: args.trim(),
+        isRestmon: draft.isRestmon,
+        localPath: draft.scriptPath,
+      })
+      setRunOpen(true)
     }
 
     const encryptPass = async () => {
@@ -563,12 +570,12 @@ export default forwardRef<ScriptFormHandle, Props>(
 
         <Divider />
         <Box sx={{ display: 'flex', gap: 1, p: 2, backgroundColor: 'background.paper' }}>
-          <Button variant='outlined' startIcon={<ScienceIcon />} onClick={runDryRun}>Dry Run</Button>
+          <Button variant='outlined' startIcon={<ScienceIcon />} onClick={runDryRun}>Run…</Button>
           <Button variant='contained' startIcon={<SaveIcon />} onClick={save}>Save Script</Button>
           <Button variant='text' startIcon={<CloseIcon />} onClick={onClose}>Cancel</Button>
         </Box>
 
-        <DryRunResultsDialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} results={dryRunResults} />
+        <RunDialog open={runOpen} onClose={() => setRunOpen(false)} script={runScript} />
 
         <Snackbar
           key={toast?.id}
