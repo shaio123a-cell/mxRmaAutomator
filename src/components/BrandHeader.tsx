@@ -1,7 +1,15 @@
 import React from 'react'
 import { Box, Typography } from '@mui/material'
 
-export default function BrandHeader({ compact = false }: { compact?: boolean }) {
+export default function BrandHeader({
+  compact = false,
+  title = 'SUPERSONIC',
+  showByMatrix = false,
+}: {
+  compact?: boolean
+  title?: string
+  showByMatrix?: boolean
+}) {
   return (
     <Box
       sx={theme => ({
@@ -28,24 +36,39 @@ export default function BrandHeader({ compact = false }: { compact?: boolean }) 
         },
       })}
     >
-      <Typography
-        component='h1'
-        sx={{
-          fontWeight: 800,
-          letterSpacing: { xs: '0.06em', sm: '0.14em' },
-          fontSize: { xs: '1.35rem', sm: compact ? '1.5rem' : '2rem' },
-          lineHeight: 1.1,
-          background: theme =>
-            theme.palette.mode === 'dark'
-              ? 'linear-gradient(90deg, #9cc2f0 0%, #e1b3ea 100%)'
-              : 'linear-gradient(90deg, #0b3d91 0%, #4a148c 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          backgroundClip: 'text',
-        }}
-      >
-        SUPERSONIC
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: { xs: 1, sm: 1.5 } }}>
+        <Typography
+          component='h1'
+          sx={{
+            fontWeight: 800,
+            letterSpacing: { xs: '0.06em', sm: '0.14em' },
+            fontSize: { xs: '1.35rem', sm: compact ? '1.5rem' : '2rem' },
+            lineHeight: 1.1,
+            background: theme =>
+              theme.palette.mode === 'dark'
+                ? 'linear-gradient(90deg, #9cc2f0 0%, #e1b3ea 100%)'
+                : 'linear-gradient(90deg, #0b3d91 0%, #4a148c 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}
+        >
+          {title}
+        </Typography>
+        {showByMatrix && (
+          <Typography
+            variant='subtitle2'
+            sx={{
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              fontSize: { xs: '0.7rem', sm: compact ? '0.8rem' : '0.9rem' },
+              color: 'text.secondary',
+            }}
+          >
+            by Matrix
+          </Typography>
+        )}
+      </Box>
       <Typography
         variant='body2'
         sx={{
@@ -57,7 +80,7 @@ export default function BrandHeader({ compact = false }: { compact?: boolean }) 
           color: 'text.secondary',
         }}
       >
-        MatrixKB Accelerator for BMC PATROL for Scripting
+        Matrix Accelerator for BMC PATROL for Scripting
       </Typography>
     </Box>
   )

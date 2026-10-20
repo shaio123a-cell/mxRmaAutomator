@@ -1,7 +1,7 @@
 import React from 'react'
 import { Box, Divider, IconButton, Tooltip, Typography } from '@mui/material'
 import DashboardIcon from '@mui/icons-material/Dashboard'
-import SmartToyIcon from '@mui/icons-material/SmartToy'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DnsIcon from '@mui/icons-material/Dns'
 import SettingsIcon from '@mui/icons-material/Settings'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
@@ -44,7 +44,12 @@ export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHel
         backgroundColor: 'background.paper', position: 'sticky', top: 0, height: '100vh'
       }}>
         <Tooltip title='MatrixKB for BMC Helix' placement='right'>
-          <Box component='img' src={MatrixKBLogo} alt='MatrixKB' sx={{ height: 28, mb: 1, objectFit: 'contain' }} />
+          <Box sx={{
+            width: 52, height: 28, mb: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 1, backgroundColor: '#ffffff', border: '1px solid', borderColor: 'divider', overflow: 'hidden',
+          }}>
+            <Box component='img' src={MatrixKBLogo} alt='MatrixKB' sx={{ width: 48, height: 'auto', display: 'block' }} />
+          </Box>
         </Tooltip>
 
         <Tooltip title='Configuration Editor' placement='right'>
@@ -54,7 +59,7 @@ export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHel
         </Tooltip>
         <Tooltip title='Agentic Scripting' placement='right'>
           <IconButton color={view === 'agentic' ? 'primary' : 'default'} onClick={() => onViewChange('agentic')} aria-label='agentic scripting'>
-            <SmartToyIcon />
+            <AutoAwesomeIcon />
           </IconButton>
         </Tooltip>
         <Tooltip title='Execution Hosts' placement='right'>
@@ -85,9 +90,23 @@ export default function AppShell({ view, onViewChange, onOpenSettings, onOpenHel
         {electronAction}
 
         <Box sx={{ flex: 1 }} />
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, pb: 0.5 }}>
-          <Box component='img' src={MatrixLogo} alt='Matrix' sx={{ height: 20 }} />
-          <Box component='img' src={BMCHelixLogo} alt='BMC Helix' sx={{ height: 22, background: 'transparent' }} />
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.75, pb: 0.5 }}>
+          <Tooltip title='Matrix' placement='right'>
+            <Box sx={{
+              width: 52, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: 1, backgroundColor: '#ffffff', border: '1px solid', borderColor: 'divider', overflow: 'hidden',
+            }}>
+              <Box component='img' src={MatrixLogo} alt='Matrix' sx={{ width: 48, height: 'auto', display: 'block' }} />
+            </Box>
+          </Tooltip>
+          <Tooltip title='BMC Helix' placement='right'>
+            <Box sx={{
+              width: 52, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: 1, backgroundColor: '#ffffff', border: '1px solid', borderColor: 'divider', overflow: 'hidden',
+            }}>
+              <Box component='img' src={BMCHelixLogo} alt='BMC Helix' sx={{ width: 48, height: 'auto', display: 'block' }} />
+            </Box>
+          </Tooltip>
         </Box>
       </Box>
 

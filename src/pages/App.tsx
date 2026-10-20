@@ -536,8 +536,6 @@ export default function App() {
           </DialogActions>
         </Dialog>
 
-        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={showToast} />
-        <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
         {/* Load unsaved changes confirmation dialog for file open */}
         <Dialog open={loadUnsavedOpen} onClose={() => setLoadUnsavedOpen(false)}>
           <DialogTitle>Unsaved changes</DialogTitle>
@@ -587,25 +585,43 @@ export default function App() {
         {/* Snack for clipboard actions */}
         <Snackbar open={Boolean(clipMsg)} autoHideDuration={2000} onClose={() => setClipMsg(null)} message={clipMsg || ''} />
 
-        <Snackbar
-          key={toast?.id}
-          open={Boolean(toast)}
-          autoHideDuration={2000}
-          onClose={() => setToast(null)}
-          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        >
-          <Alert
-            onClose={() => setToast(null)}
-            severity={toast?.severity || 'success'}
-            variant='filled'
-            sx={{ py: 0.5, px: 1.5, fontSize: '0.875rem', alignItems: 'center' }}
-          >
-            {toast?.message || ''}
-          </Alert>
-        </Snackbar>
-
       </Stack>
       )}
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={showToast} />
+      <HelpDialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onOpenSettings={() => {
+          setHelpOpen(false)
+          setSettingsOpen(true)
+        }}
+        onNavigate={target => {
+          setHelpOpen(false)
+          if (target === 'raw') {
+            setView('editor')
+            setEditorTab('raw')
+            return
+          }
+          setView(target)
+          if (target === 'editor') setEditorTab('manage')
+        }}
+      />
+      <Snackbar
+        key={toast?.id}
+        open={Boolean(toast)}
+        autoHideDuration={2000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setToast(null)}
+          severity={toast?.severity || 'success'}
+          variant='filled'
+          sx={{ py: 0.5, px: 1.5, fontSize: '0.875rem', alignItems: 'center' }}
+        >
+          {toast?.message || ''}
+        </Alert>
+      </Snackbar>
     </AppShell>
   )
 

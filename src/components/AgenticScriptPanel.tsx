@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -26,7 +26,8 @@ import {
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import SaveAltIcon from '@mui/icons-material/SaveAlt'
+import SaveIcon from '@mui/icons-material/Save'
+import SaveAsIcon from '@mui/icons-material/SaveAs'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import AddIcon from '@mui/icons-material/Add'
@@ -132,6 +133,7 @@ export default function AgenticScriptPanel({
   const latestChatRecordRef = useRef<AgenticChatRecord | null>(null)
   const saveTimerRef = useRef<number | null>(null)
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null)
 
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const stored = Number(window.localStorage.getItem('mx-rma-agentic-sidebar-width'))
@@ -166,6 +168,13 @@ export default function AgenticScriptPanel({
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }
+
+  useLayoutEffect(() => {
+    if (isHistoryLoading) return
+    const container = messagesScrollRef.current
+    if (!container) return
+    container.scrollTop = container.scrollHeight
+  }, [activeChatId, isHistoryLoading, messages.length])
 
   const systemPrompt = useMemo(
     () => getActiveSystemPrompt(prompts, activePromptId),
@@ -702,7 +711,7 @@ export default function AgenticScriptPanel({
         {storageError && <Typography variant='caption' color='error'>{storageError}</Typography>}
 
         {messages.length > 0 && (
-          <Box aria-live='polite' sx={{ display: 'grid', gap: 1, maxHeight: 240, overflowY: 'auto' }}>
+          <Box ref={messagesScrollRef} aria-live='polite' sx={{ display: 'grid', gap: 1, maxHeight: 240, overflowY: 'auto' }}>
             {messages.map((message, index) => (
               <Box key={`${index}-${message.role}`} sx={theme => ({ justifySelf: message.role === 'user' ? 'end' : 'start', maxWidth: 'min(90%, 800px)', px: 1.5, py: 1, borderRadius: 1, backgroundColor: message.role === 'user' ? (theme.palette.mode === 'dark' ? 'rgba(91,143,212,0.2)' : '#e7f0fb') : (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : '#f4f6f8') })}>
                 <Typography variant='caption' color='text.secondary'>{message.role === 'user' ? 'You' : 'Assistant'}</Typography>
@@ -783,37 +792,43 @@ export default function AgenticScriptPanel({
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           <Tooltip title='Copy script'>
             <span>
-              <IconButton onClick={() => void copyScript()} disabled={!generatedScript} aria-label='copy script'
-                sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, width: 40, height: 40 }}>
+              <IconButton color='primary' onClick={() => void copyScript()} disabled={!generatedScript} aria-label='copy script'
+                sx={{ border: '1px solid', borderColor: 'primary.main', borderRadius: 1.5, width: 40, height: 40 }}>
                 <ContentCopyIcon fontSize='small' />
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title='Save script'>
+          <Tooltip title='Save script (overwrites the current file)'>
             <span>
-              <IconButton onClick={() => void saveScript(false)} disabled={!generatedScript} aria-label='save script'
-                sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, width: 40, height: 40 }}>
-                <SaveAltIcon fontSize='small' />
-              </IconButton>
+              <Button size='small' variant='outlined' startIcon={<SaveIcon />} onClick={() => void saveScript(false)} disabled={!generatedScript} aria-label='save script'
+                sx={{ height: 40 }}>
+                Save
+              </Button>
             </span>
           </Tooltip>
-          <Tooltip title='Save script as new file'>
+          <Tooltip title='Save script as a new file'>
             <span>
-              <IconButton onClick={() => void saveScript(true)} disabled={!generatedScript} aria-label='save script as new file'
-                sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, width: 40, height: 40 }}>
-                <SaveAltIcon fontSize='small' />
-              </IconButton>
+              <Button size='small' variant='outlined' startIcon={<SaveAsIcon />} onClick={() => void saveScript(true)} disabled={!generatedScript} aria-label='save script as new file'
+                sx={{ height: 40 }}>
+                Save as new
+              </Button>
             </span>
           </Tooltip>
           <Tooltip title='Test run script'>
             <span>
-              <IconButton onClick={() => void testScript()} disabled={!generatedScript} aria-label='test run script'
-                sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, width: 40, height: 40 }}>
+              <IconButton color='primary' onClick={() => void testScript()} disabled={!generatedScript} aria-label='test run script'
+                sx={{ border: '1px solid', borderColor: 'primary.main', borderRadius: 1.5, width: 40, height: 40 }}>
                 <PlayArrowIcon fontSize='small' />
               </IconButton>
             </span>
           </Tooltip>
-          <TextField select size='small' label='Target device' value={effectiveTargetDeviceId} onChange={event => setTargetDeviceId(event.target.value)} sx={{ minWidth: 200 }}>
+          <TextField select size='small' label='Target device' value={effectiveTargetDeviceId} onChange={event => setTargetDeviceId(event.target.value)} sx={{
+            minWidth: 200,
+            '& .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+            '& .MuiInputLabel-root': { color: 'primary.main' },
+            '& .MuiSelect-icon': { color: 'primary.main' },
+          }}>
             {devices.map(device => <MenuItem key={device.id} value={device.id}>{device.name}</MenuItem>)}
           </TextField>
           <Tooltip title='Configure this script on the selected device'>
