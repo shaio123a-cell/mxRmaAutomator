@@ -585,6 +585,24 @@ export default function AgenticScriptPanel({
     setRunOpen(true)
   }
 
+  const applyDiagnosedScript = (content: string) => {
+    if (!generatedScript) return
+    const repaired: AiGeneratedScript = {
+      ...generatedScript,
+      id: crypto.randomUUID(),
+      content,
+      contentHash: hashScriptContent(content),
+      createdAt: new Date().toISOString(),
+      modelName: `${generatedScript.modelName} · AI repair`,
+      summary: 'AI-repaired version created from a failed test run. Nothing was saved or run.',
+      lastVerified: undefined,
+    }
+    setGeneratedScript(repaired)
+    setGeneratedScripts(current => [...current, repaired])
+    setLastChatActivityAt(new Date().toISOString())
+    setStatusText('Applied the AI repair as a new version. Review it, then save or test when ready.')
+  }
+
   const enabledModelCount = models.filter(model => model.enabled).length
 
   return (
@@ -924,7 +942,7 @@ export default function AgenticScriptPanel({
 
       </Stack>
       </Box>
-      <RunDialog open={runOpen} onClose={() => setRunOpen(false)} script={runScript} />
+      <RunDialog open={runOpen} onClose={() => setRunOpen(false)} script={runScript} onApplyDiagnosis={applyDiagnosedScript} />
       <Dialog open={renameDialogOpen} onClose={() => setRenameDialogOpen(false)} maxWidth='xs' fullWidth>
         <DialogTitle>Rename chat</DialogTitle>
         <DialogContent>

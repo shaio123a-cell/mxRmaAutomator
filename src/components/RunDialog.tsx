@@ -9,7 +9,10 @@ import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import { GuideBox, transportGuidance } from './RemoteGuidance'
+import AiDiagnosisDialog from './AiDiagnosisDialog'
+import { getActiveSystemPrompt, type AiDiagnosisInput } from '../services/aiService'
 import { useAppSelector } from '../store/store'
 import type { Device } from '../store/fbcskmSlice'
 import type {
@@ -128,8 +131,11 @@ function readStoredTarget(key: string): Partial<{ targetKind: TargetKind; hostId
   }
 }
 
-export default function RunDialog({ open, onClose, script }: { open: boolean, onClose: () => void, script: RunDialogScript | null }) {
+export default function RunDialog({ open, onClose, script, onApplyDiagnosis }: { open: boolean, onClose: () => void, script: RunDialogScript | null, onApplyDiagnosis?: (fixedScript: string) => void }) {
   const devices = useAppSelector(state => state.fbcskm.devices)
+  const aiModels = useAppSelector(state => state.fbcskm.aiModels)
+  const systemPrompts = useAppSelector(state => state.fbcskm.systemPrompts)
+  const activeSystemPromptId = useAppSelector(state => state.fbcskm.activeSystemPromptId)
   const bridge = getBridge()
   const [inventory, setInventory] = useState<RemoteInventory | null>(null)
   const [targetKind, setTargetKind] = useState<TargetKind>('local')
@@ -162,8 +168,15 @@ export default function RunDialog({ open, onClose, script }: { open: boolean, on
   const [commandTouched, setCommandTouched] = useState(false)
   const [copiedOutput, setCopiedOutput] = useState(false)
   const [patrolValidation, setPatrolValidation] = useState<PatrolValidationResult | null>(null)
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false)
+  const [diagnosisInput, setDiagnosisInput] = useState<AiDiagnosisInput | null>(null)
   const runIdRef = useRef('')
   const consoleRef = useRef<HTMLPreElement | null>(null)
+
+  const activeSystemPrompt = useMemo(
+    () => getActiveSystemPrompt(systemPrompts, activeSystemPromptId),
+    [systemPrompts, activeSystemPromptId],
+  )
 
   const hosts = inventory?.hosts ?? []
   const profiles = inventory?.profiles ?? []
@@ -205,6 +218,8 @@ export default function RunDialog({ open, onClose, script }: { open: boolean, on
     setCommandTouched(false)
     setCopiedOutput(false)
     setPatrolValidation(null)
+    setDiagnosisOpen(false)
+    setDiagnosisInput(null)
   }, [open, script])
 
   useEffect(() => {
@@ -463,11 +478,46 @@ export default function RunDialog({ open, onClose, script }: { open: boolean, on
     setPatrolValidation(validatePatrolOutput(stdoutText))
   }
 
+  const diagnosisRelevant = useMemo(() => {
+    if (!result || !script?.content) return false
+    if (result.exitCode !== 0) return true
+    if ((result.stderr || '').trim()) return true
+    if ((result.stdout || '').trim()) return !validatePatrolOutput(result.stdout || '').ok
+    return false
+  }, [result, script?.content])
+
+  const openDiagnosis = () => {
+    if (!script?.content || !result) return
+    const validation = validatePatrolOutput(result.stdout || '')
+    const transport = targetKind === 'local'
+      ? 'local'
+      : targetKind === 'host'
+        ? selectedHost?.transport
+        : targetKind === 'device'
+          ? deviceInfo?.transport
+          : adhocTransport
+    setDiagnosisInput({
+      script: script.content,
+      name: script.name || 'script',
+      os: resolvedOs,
+      transport,
+      command: commandDraft || defaultCommand || undefined,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      validationOk: validation.ok,
+      validationIssues: validation.issues.map(issue => issue.line ? `Line ${issue.line}: ${issue.message}` : issue.message),
+      validationWarnings: validation.warnings.map(issue => issue.line ? `Line ${issue.line}: ${issue.message}` : issue.message),
+    })
+    setDiagnosisOpen(true)
+  }
+
   const credentialOptions = targetKind === 'device'
     ? (['device', 'profile', 'adhoc'] as CredentialKind[])
     : (['profile', 'adhoc'] as CredentialKind[])
 
   return (
+    <>
     <Dialog open={open} onClose={running ? undefined : onClose} maxWidth='md' fullWidth>
       <DialogTitle>Run Script</DialogTitle>
       <DialogContent dividers>
@@ -668,12 +718,85 @@ export default function RunDialog({ open, onClose, script }: { open: boolean, on
           )}
 
           <Divider />
-          <Stack direction='row' spacing={1} alignItems='center'>
+          <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
             <Typography variant='body2' color='text.secondary' sx={{ flex: 1 }}>
-              {status || (running ? 'Running…' : 'Ready')}
+              {status || (running ? 'Running…' : result ? 'Last run finished' : 'Ready to run')}
             </Typography>
             {running && <CircularProgress size={18} />}
+            {result && (
+              <Chip
+                size='small'
+                color={result.exitCode === 0 ? 'success' : 'warning'}
+                label={`Exit ${result.exitCode ?? 'unknown'} · ${result.durationMs} ms`}
+              />
+            )}
+            {patrolValidation && (
+              <Chip
+                size='small'
+                color={patrolValidation.ok ? 'success' : 'error'}
+                label={patrolValidation.ok ? 'PATROL output valid' : 'PATROL output invalid'}
+              />
+            )}
           </Stack>
+
+          {error && <Alert severity='error'>{error}</Alert>}
+
+          {result && (
+            <Alert severity={result.exitCode === 0 ? 'success' : 'warning'}>
+              <Typography variant='body2'>
+                Exit code {result.exitCode ?? 'unknown'} · {result.durationMs} ms · {result.decision}
+                {result.backupPath ? ` · backup: ${result.backupPath}` : ''}
+              </Typography>
+              {result.remoteHashAfter && (
+                <Typography variant='caption' display='block'>
+                  Remote sha256: {shortHash(result.remoteHashAfter)}
+                </Typography>
+              )}
+              {diagnosisRelevant && (
+                <Box sx={{ mt: 1 }}>
+                  <Button size='small' variant='outlined' startIcon={<AutoFixHighIcon />} onClick={openDiagnosis}>
+                    Diagnose &amp; fix with AI
+                  </Button>
+                  <Typography variant='caption' display='block' sx={{ mt: 0.5 }}>
+                    Sends the script and output to your configured AI provider. Nothing is changed automatically.
+                  </Typography>
+                </Box>
+              )}
+            </Alert>
+          )}
+
+          {patrolValidation && (
+            <Alert
+              severity={patrolValidation.ok ? 'success' : 'error'}
+              onClose={() => setPatrolValidation(null)}
+            >
+              <Typography variant='body2' fontWeight={600}>
+                {patrolValidation.ok
+                  ? `Valid PATROL for Scripting output${patrolValidation.format ? ` (Format ${patrolValidation.format})` : ''}.`
+                  : 'Output is not valid for PATROL for Scripting.'}
+              </Typography>
+              {patrolValidation.issues.slice(0, 6).map((issue, index) => (
+                <Typography key={`patrol-issue-${index}`} variant='caption' display='block'>
+                  {issue.line ? `Line ${issue.line}: ` : ''}{issue.message}
+                </Typography>
+              ))}
+              {patrolValidation.issues.length > 6 && (
+                <Typography variant='caption' display='block'>
+                  …and {patrolValidation.issues.length - 6} more issue(s).
+                </Typography>
+              )}
+              {patrolValidation.warnings.slice(0, 4).map((warning, index) => (
+                <Typography key={`patrol-warning-${index}`} variant='caption' display='block' color='text.secondary'>
+                  Warning: {warning.line ? `line ${warning.line}: ` : ''}{warning.message}
+                </Typography>
+              ))}
+              {patrolValidation.warnings.length > 4 && (
+                <Typography variant='caption' display='block' color='text.secondary'>
+                  …and {patrolValidation.warnings.length - 4} more warning(s).
+                </Typography>
+              )}
+            </Alert>
+          )}
 
           <Box>
             <Stack direction='row' alignItems='center' spacing={1} sx={{ mb: 0.5 }}>
@@ -707,56 +830,8 @@ export default function RunDialog({ open, onClose, script }: { open: boolean, on
                 </Box>
               ))}
             </Box>
-            {patrolValidation && (
-              <Alert
-                severity={patrolValidation.ok ? 'success' : 'error'}
-                onClose={() => setPatrolValidation(null)}
-                sx={{ mt: 1 }}
-              >
-                <Typography variant='body2' fontWeight={600}>
-                  {patrolValidation.ok
-                    ? `Valid PATROL for Scripting output${patrolValidation.format ? ` (Format ${patrolValidation.format})` : ''}.`
-                    : 'Output is not valid for PATROL for Scripting.'}
-                </Typography>
-                {patrolValidation.issues.slice(0, 6).map((issue, index) => (
-                  <Typography key={`patrol-issue-${index}`} variant='caption' display='block'>
-                    {issue.line ? `Line ${issue.line}: ` : ''}{issue.message}
-                  </Typography>
-                ))}
-                {patrolValidation.issues.length > 6 && (
-                  <Typography variant='caption' display='block'>
-                    …and {patrolValidation.issues.length - 6} more issue(s).
-                  </Typography>
-                )}
-                {patrolValidation.warnings.slice(0, 4).map((warning, index) => (
-                  <Typography key={`patrol-warning-${index}`} variant='caption' display='block' color='text.secondary'>
-                    Warning: {warning.line ? `line ${warning.line}: ` : ''}{warning.message}
-                  </Typography>
-                ))}
-                {patrolValidation.warnings.length > 4 && (
-                  <Typography variant='caption' display='block' color='text.secondary'>
-                    …and {patrolValidation.warnings.length - 4} more warning(s).
-                  </Typography>
-                )}
-              </Alert>
-            )}
           </Box>
 
-          {error && <Alert severity='error'>{error}</Alert>}
-
-          {result && (
-            <Alert severity={result.exitCode === 0 ? 'success' : 'warning'}>
-              <Typography variant='body2'>
-                Exit code {result.exitCode ?? 'unknown'} · {result.durationMs} ms · {result.decision}
-                {result.backupPath ? ` · backup: ${result.backupPath}` : ''}
-              </Typography>
-              {result.remoteHashAfter && (
-                <Typography variant='caption' display='block'>
-                  Remote sha256: {shortHash(result.remoteHashAfter)}
-                </Typography>
-              )}
-            </Alert>
-          )}
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -765,5 +840,14 @@ export default function RunDialog({ open, onClose, script }: { open: boolean, on
         <Button variant='contained' startIcon={<PlayArrowIcon />} onClick={() => void start()} disabled={!canRun}>Run</Button>
       </DialogActions>
     </Dialog>
+    <AiDiagnosisDialog
+      open={diagnosisOpen}
+      onClose={() => setDiagnosisOpen(false)}
+      input={diagnosisInput}
+      models={aiModels}
+      systemPrompt={activeSystemPrompt}
+      onApply={onApplyDiagnosis}
+    />
+    </>
   )
 }

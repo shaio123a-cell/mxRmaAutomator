@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
-  FormControlLabel, IconButton, MenuItem, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs,
-  TextField, Tooltip, Typography,
+  Alert, Box, Button, Checkbox, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
+  FormControlLabel, IconButton, InputAdornment, MenuItem, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow,
+  Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import FilterListIcon from '@mui/icons-material/FilterList'
 import LockIcon from '@mui/icons-material/Lock'
+import SearchIcon from '@mui/icons-material/Search'
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser'
 import DnsIcon from '@mui/icons-material/Dns'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
@@ -19,10 +22,62 @@ import type {
 } from '../services/remoteTypes'
 
 type TabKey = 'hosts' | 'credentials'
+type HostSearchField = 'address' | 'os' | 'transport' | 'credentialProfile' | 'environment' | 'status'
+type ProfileSearchField = 'authType' | 'username' | 'privateKeyPath' | 'secret'
+
+const hostSearchFieldOptions: { key: HostSearchField; label: string }[] = [
+  { key: 'address', label: 'Address' },
+  { key: 'os', label: 'OS' },
+  { key: 'transport', label: 'Transport' },
+  { key: 'credentialProfile', label: 'Credential profile' },
+  { key: 'environment', label: 'Environment' },
+  { key: 'status', label: 'Status' },
+]
+
+const profileSearchFieldOptions: { key: ProfileSearchField; label: string }[] = [
+  { key: 'authType', label: 'Auth type' },
+  { key: 'username', label: 'Username' },
+  { key: 'privateKeyPath', label: 'Private key' },
+  { key: 'secret', label: 'Secret' },
+]
+
+const emptyHostSearchFields: Record<HostSearchField, boolean> = {
+  address: false,
+  os: false,
+  transport: false,
+  credentialProfile: false,
+  environment: false,
+  status: false,
+}
+
+const emptyProfileSearchFields: Record<ProfileSearchField, boolean> = {
+  authType: false,
+  username: false,
+  privateKeyPath: false,
+  secret: false,
+}
 
 function getBridge(): RemoteBridge | null {
   const bridge = window.electronAPI?.remote
   return bridge?.available ? bridge : null
+}
+
+function transportLabel(transport: RemoteTransport): string {
+  switch (transport) {
+    case 'ssh': return 'SSH'
+    case 'winrm': return 'WinRM'
+    case 'powershell-remoting': return 'PowerShell Remoting'
+    case 'local': return 'Local'
+  }
+}
+
+function authTypeLabel(authType: RemoteAuthType): string {
+  switch (authType) {
+    case 'password': return 'Password'
+    case 'private-key': return 'Private key'
+    case 'ssh-agent': return 'SSH agent'
+    case 'windows-integrated': return 'Windows integrated'
+  }
 }
 
 const emptyHost: ExecutionHostInput = {
@@ -101,6 +156,12 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [hostSearch, setHostSearch] = useState('')
+  const [hostAdvancedOpen, setHostAdvancedOpen] = useState(false)
+  const [hostSearchFields, setHostSearchFields] = useState<Record<HostSearchField, boolean>>({ ...emptyHostSearchFields })
+  const [profileSearch, setProfileSearch] = useState('')
+  const [profileAdvancedOpen, setProfileAdvancedOpen] = useState(false)
+  const [profileSearchFields, setProfileSearchFields] = useState<Record<ProfileSearchField, boolean>>({ ...emptyProfileSearchFields })
   const [hostDrawer, setHostDrawer] = useState(false)
   const [profileDrawer, setProfileDrawer] = useState(false)
   const [hostDraft, setHostDraft] = useState<ExecutionHostInput>(emptyHost)
@@ -126,6 +187,58 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
   const profilesById = useMemo(() => new Map(inventory.profiles.map(profile => [profile.id, profile])), [inventory.profiles])
   const profileGuide = authGuidance[profileDraft.authType]
   const hostGuide = transportGuidance(hostDraft.os, hostDraft.transport)
+  const hostAdvancedCount = Object.values(hostSearchFields).filter(Boolean).length
+  const profileAdvancedCount = Object.values(profileSearchFields).filter(Boolean).length
+
+  const filteredHosts = useMemo(() => {
+    const query = hostSearch.trim().toLowerCase()
+    if (!query) return inventory.hosts
+    return inventory.hosts.filter(host => {
+      const profile = profilesById.get(host.credentialProfileId)
+      const values = [host.name]
+      if (hostSearchFields.address) values.push(host.address)
+      if (hostSearchFields.os) values.push(host.os, host.os === 'windows' ? 'Windows' : 'Linux')
+      if (hostSearchFields.transport) values.push(host.transport, transportLabel(host.transport))
+      if (hostSearchFields.credentialProfile) values.push(profile?.name || 'Missing profile')
+      if (hostSearchFields.environment) values.push(host.environment || 'lab')
+      if (hostSearchFields.status) {
+        values.push(host.lastConnectedAt ? new Date(host.lastConnectedAt).toLocaleString() : 'Never')
+        if (host.lastConnectedAt) values.push(host.lastConnectedAt)
+      }
+      return values.some(value => value.toLowerCase().includes(query))
+    })
+  }, [inventory.hosts, profilesById, hostSearch, hostSearchFields])
+
+  const filteredProfiles = useMemo(() => {
+    const query = profileSearch.trim().toLowerCase()
+    if (!query) return inventory.profiles
+    return inventory.profiles.filter(profile => {
+      const values = [profile.name]
+      if (profileSearchFields.authType) values.push(profile.authType, authTypeLabel(profile.authType))
+      if (profileSearchFields.username) values.push(profile.username || '')
+      if (profileSearchFields.privateKeyPath) values.push(profile.privateKeyPath || '')
+      if (profileSearchFields.secret) values.push(profile.hasSecret ? 'Stored' : 'Not set')
+      return values.some(value => value.toLowerCase().includes(query))
+    })
+  }, [inventory.profiles, profileSearch, profileSearchFields])
+
+  const toggleHostSearchField = (field: HostSearchField) => {
+    setHostSearchFields(current => ({ ...current, [field]: !current[field] }))
+  }
+
+  const toggleProfileSearchField = (field: ProfileSearchField) => {
+    setProfileSearchFields(current => ({ ...current, [field]: !current[field] }))
+  }
+
+  const clearHostSearch = () => {
+    setHostSearch('')
+    setHostSearchFields({ ...emptyHostSearchFields })
+  }
+
+  const clearProfileSearch = () => {
+    setProfileSearch('')
+    setProfileSearchFields({ ...emptyProfileSearchFields })
+  }
 
   const changeOs = (os: RemoteOs) => {
     setHostDraft(current => ({
@@ -240,8 +353,8 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
       </Typography>
 
       <Tabs value={tab} onChange={(event, value) => setTab(value)} sx={{ mb: 2 }}>
-        <Tab value='hosts' label={`Hosts (${inventory.hosts.length})`} />
-        <Tab value='credentials' label={`Credentials (${inventory.profiles.length})`} />
+        <Tab value='hosts' icon={<DnsIcon />} iconPosition='start' label={`Hosts (${inventory.hosts.length})`} />
+        <Tab value='credentials' icon={<LockIcon />} iconPosition='start' label={`Credentials (${inventory.profiles.length})`} />
       </Tabs>
 
       {error && <Alert severity='error' sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
@@ -263,6 +376,60 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
             )}
           </Alert>
         ) : (
+          <Box>
+            <Stack spacing={1} sx={{ mb: 1.5 }}>
+              <Stack direction='row' spacing={1} alignItems='center' sx={{ flexWrap: 'wrap' }}>
+                <TextField
+                  size='small'
+                  placeholder='Search hosts by name'
+                  value={hostSearch}
+                  onChange={event => setHostSearch(event.target.value)}
+                  sx={{ width: { xs: '100%', sm: 320 } }}
+                  InputProps={{
+                    startAdornment: <InputAdornment position='start'><SearchIcon fontSize='small' /></InputAdornment>,
+                    endAdornment: hostSearch ? (
+                      <InputAdornment position='end'>
+                        <IconButton size='small' edge='end' aria-label='clear host search' onClick={() => setHostSearch('')}>
+                          <CloseIcon fontSize='small' />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : undefined,
+                  }}
+                />
+                <Button
+                  size='small'
+                  variant={hostAdvancedOpen ? 'contained' : 'outlined'}
+                  startIcon={<FilterListIcon />}
+                  onClick={() => setHostAdvancedOpen(current => !current)}
+                >
+                  Advanced{hostAdvancedCount > 0 ? ` (${hostAdvancedCount})` : ''}
+                </Button>
+                {hostSearch.trim() && (
+                  <Typography variant='caption' color='text.secondary'>
+                    Showing {filteredHosts.length} of {inventory.hosts.length}
+                  </Typography>
+                )}
+              </Stack>
+              <Collapse in={hostAdvancedOpen}>
+                <Stack direction='row' spacing={1.5} sx={{ flexWrap: 'wrap', pl: 0.5 }}>
+                  {hostSearchFieldOptions.map(option => (
+                    <FormControlLabel
+                      key={option.key}
+                      control={<Checkbox size='small' checked={hostSearchFields[option.key]} onChange={() => toggleHostSearchField(option.key)} />}
+                      label={option.label}
+                    />
+                  ))}
+                </Stack>
+              </Collapse>
+            </Stack>
+            {filteredHosts.length === 0 ? (
+              <Alert
+                severity='info'
+                action={<Button color='inherit' size='small' onClick={clearHostSearch}>Clear search</Button>}
+              >
+                No hosts match your search.
+              </Alert>
+            ) : (
           <Table size='small'>
             <TableHead>
               <TableRow>
@@ -277,7 +444,7 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {inventory.hosts.map(host => {
+              {filteredHosts.map(host => {
                 const profile = profilesById.get(host.credentialProfileId)
                 return (
                   <TableRow key={host.id} hover>
@@ -313,7 +480,9 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
                 )
               })}
             </TableBody>
-          </Table>
+              </Table>
+            )}
+          </Box>
         )
       )}
 
@@ -333,6 +502,60 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
             )}
           </Alert>
         ) : (
+          <Box>
+            <Stack spacing={1} sx={{ mb: 1.5 }}>
+              <Stack direction='row' spacing={1} alignItems='center' sx={{ flexWrap: 'wrap' }}>
+                <TextField
+                  size='small'
+                  placeholder='Search credentials by name'
+                  value={profileSearch}
+                  onChange={event => setProfileSearch(event.target.value)}
+                  sx={{ width: { xs: '100%', sm: 320 } }}
+                  InputProps={{
+                    startAdornment: <InputAdornment position='start'><SearchIcon fontSize='small' /></InputAdornment>,
+                    endAdornment: profileSearch ? (
+                      <InputAdornment position='end'>
+                        <IconButton size='small' edge='end' aria-label='clear credential search' onClick={() => setProfileSearch('')}>
+                          <CloseIcon fontSize='small' />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : undefined,
+                  }}
+                />
+                <Button
+                  size='small'
+                  variant={profileAdvancedOpen ? 'contained' : 'outlined'}
+                  startIcon={<FilterListIcon />}
+                  onClick={() => setProfileAdvancedOpen(current => !current)}
+                >
+                  Advanced{profileAdvancedCount > 0 ? ` (${profileAdvancedCount})` : ''}
+                </Button>
+                {profileSearch.trim() && (
+                  <Typography variant='caption' color='text.secondary'>
+                    Showing {filteredProfiles.length} of {inventory.profiles.length}
+                  </Typography>
+                )}
+              </Stack>
+              <Collapse in={profileAdvancedOpen}>
+                <Stack direction='row' spacing={1.5} sx={{ flexWrap: 'wrap', pl: 0.5 }}>
+                  {profileSearchFieldOptions.map(option => (
+                    <FormControlLabel
+                      key={option.key}
+                      control={<Checkbox size='small' checked={profileSearchFields[option.key]} onChange={() => toggleProfileSearchField(option.key)} />}
+                      label={option.label}
+                    />
+                  ))}
+                </Stack>
+              </Collapse>
+            </Stack>
+            {filteredProfiles.length === 0 ? (
+              <Alert
+                severity='info'
+                action={<Button color='inherit' size='small' onClick={clearProfileSearch}>Clear search</Button>}
+              >
+                No credentials match your search.
+              </Alert>
+            ) : (
           <Table size='small'>
             <TableHead>
               <TableRow>
@@ -345,7 +568,7 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {inventory.profiles.map(profile => (
+              {filteredProfiles.map(profile => (
                 <TableRow key={profile.id} hover>
                   <TableCell>{profile.name}</TableCell>
                   <TableCell>{profile.authType}</TableCell>
@@ -361,6 +584,8 @@ export default function ExecutionHostsView({ devices }: { devices: Device[] }) {
               ))}
             </TableBody>
           </Table>
+            )}
+          </Box>
         )
       )}
 

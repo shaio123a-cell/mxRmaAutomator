@@ -1,6 +1,7 @@
 import type { AIModelConfig as ConfigAIModelConfig, AISystemPrompt as ConfigAISystemPrompt } from '../config'
 import config from '../config'
 import { hashScriptContent } from '../utils/contentHash'
+import { preserveOriginalComments } from '../utils/preserveComments'
 
 export type AiProvider = ConfigAIModelConfig['provider']
 export type AiModelConfig = ConfigAIModelConfig
@@ -23,6 +24,35 @@ export interface AiGeneratedScript {
 export interface AiConversationTurn {
   role: 'user' | 'assistant'
   content: string
+}
+
+export interface AiDiagnosisInput {
+  script: string
+  name: string
+  os: string
+  transport?: string
+  command?: string
+  exitCode?: number
+  stdout?: string
+  stderr?: string
+  validationOk?: boolean
+  validationIssues?: string[]
+  validationWarnings?: string[]
+}
+
+export interface AiDiagnosis {
+  diagnosis: string
+  rootCause: string
+  fixedScript: string
+  changes: string[]
+  risks: string[]
+  confidence: 'high' | 'medium' | 'low'
+  needsUserInput: string[]
+  rawResponse: string
+  modelName: string
+  usedFallback: boolean
+  attemptedModels: string[]
+  failedModels: string[]
 }
 
 export class AiGenerationError extends Error {
@@ -497,3 +527,175 @@ function scriptTypeFromContent(content: string): string {
   if (/^\s*#!/m.test(content)) return content.match(/^#!.*$/m)?.[0].replace(/^#!\S*\/?/, '').trim() || 'automation'
   return 'automation'
 }
+
+function extractJsonObject(text: string): string {
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const source = fence?.[1] ?? text
+  const start = source.indexOf('{')
+  if (start === -1) return ''
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < source.length; index++) {
+    const character = source[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') inString = true
+    else if (character === '{') depth++
+    else if (character === '}') {
+      depth--
+      if (depth === 0) return source.slice(start, index + 1)
+    }
+  }
+  return ''
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function truncateForPrompt(value: string | undefined, limit: number): string {
+  const text = String(value ?? '')
+  if (!text) return '(empty)'
+  if (text.length <= limit) return text
+  return `${text.slice(0, limit)}\n… (${text.length - limit} more characters omitted)`
+}
+
+function parseDiagnosisResponse(response: string): Omit<AiDiagnosis, 'modelName' | 'usedFallback' | 'attemptedModels' | 'failedModels'> {
+  const jsonText = extractJsonObject(response)
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText)
+      if (parsed && typeof parsed === 'object') {
+        const rawFixed = typeof parsed.fixedScript === 'string'
+          ? parsed.fixedScript
+          : typeof parsed.script === 'string'
+            ? parsed.script
+            : ''
+        const confidence = asText(parsed.confidence).toLowerCase()
+        return {
+          diagnosis: asText(parsed.diagnosis),
+          rootCause: asText(parsed.rootCause ?? parsed.root_cause),
+          fixedScript: extractScript(rawFixed),
+          changes: parseActionItems(parsed.changes),
+          risks: parseActionItems(parsed.risks),
+          confidence: confidence === 'high' || confidence === 'low' ? confidence : 'medium',
+          needsUserInput: parseActionItems(parsed.needsUserInput ?? parsed.needs_user_input ?? parsed.needsInput),
+          rawResponse: response,
+        }
+      }
+    } catch {
+      // Fall through to the fenced-script fallback below.
+    }
+  }
+
+  const fenced = response.match(/```(?:[\w.+-]+)?[^\S\r\n]*\r?\n([\s\S]*?)```/)
+  return {
+    diagnosis: '',
+    rootCause: '',
+    fixedScript: fenced?.[1]?.trim() ?? '',
+    changes: [],
+    risks: [],
+    confidence: 'medium',
+    needsUserInput: [],
+    rawResponse: response,
+  }
+}
+
+function buildDiagnosisPrompt(input: AiDiagnosisInput): string {
+  const validation = input.validationOk === undefined ? 'not checked' : input.validationOk ? 'yes' : 'no'
+  const issues = (input.validationIssues ?? []).map(item => `- ${item}`).join('\n')
+  const warnings = (input.validationWarnings ?? []).map(item => `- ${item}`).join('\n')
+
+  return [
+    'A monitoring script failed. Diagnose the failure and propose a corrected script.',
+    '',
+    `Script name: ${input.name || 'script'}`,
+    `Target OS: ${input.os || 'unknown'}`,
+    input.transport ? `Transport: ${input.transport}` : '',
+    input.command ? `Command: ${input.command}` : '',
+    `Exit code: ${input.exitCode ?? 'unknown'}`,
+    `PATROL output valid: ${validation}`,
+    issues ? `PATROL validation errors:\n${issues}` : '',
+    warnings ? `PATROL validation warnings:\n${warnings}` : '',
+    '',
+    'STDOUT:',
+    '```',
+    truncateForPrompt(input.stdout, 12000),
+    '```',
+    '',
+    'STDERR:',
+    '```',
+    truncateForPrompt(input.stderr, 8000),
+    '```',
+    '',
+    'CURRENT SCRIPT:',
+    '```',
+    input.script,
+    '```',
+  ].filter(Boolean).join('\n')
+}
+
+export async function diagnoseScriptFailure(
+  input: AiDiagnosisInput,
+  models: AiModelConfig[] = [],
+  systemPrompt = getActiveSystemPrompt(),
+): Promise<AiDiagnosis> {
+  if (!input.script?.trim()) throw new Error('There is no script content to diagnose.')
+  const chain = getFallbackChain(models)
+  if (!chain.length) throw new Error('No AI models are enabled. Configure at least one model in Settings.')
+
+  const instructions = `${systemPrompt}
+
+You are diagnosing a failed monitoring script for BMC PATROL for Scripting (TrueSight / Helix Operations Management).
+Fix only what is needed so the script runs successfully and its output matches the PATROL format.
+Rules:
+- Keep the original language and intent.
+- Apply the smallest possible change. Copy every unchanged line verbatim, including indentation and blank lines. Do not reformat, reorder, or restructure code that does not need to change.
+- Preserve every existing comment line verbatim. Do not remove, shorten, reword, or relocate comments while fixing code.
+- Delete a comment only when you also delete the section it documents or when the comment is now factually wrong.
+- Never add destructive commands, credential values, or invented file paths.
+- If the cause is environmental (permissions, missing tool, network, wrong host), explain it and return an empty fixedScript when no code change is required.
+- fixedScript must be the COMPLETE corrected script, not a diff.
+Return ONLY a JSON object with exactly these fields:
+{"diagnosis":"one short paragraph","rootCause":"the specific cause","fixedScript":"complete corrected script or empty string","changes":["code change"],"risks":["remaining risk"],"confidence":"high|medium|low","needsUserInput":["value the user must provide or verify"]}
+Do not wrap the JSON in markdown fences. Escape newlines inside fixedScript.`
+
+  const userPrompt = buildDiagnosisPrompt(input)
+  const attemptedModels: string[] = []
+  const failedModels: string[] = []
+  const failures: string[] = []
+
+  for (const model of chain) {
+    attemptedModels.push(model.name)
+    try {
+      const response = await requestModel(model, userPrompt, instructions)
+      const parsed = parseDiagnosisResponse(response)
+      if (!parsed.diagnosis && !parsed.rootCause && !parsed.fixedScript) {
+        throw new Error('Provider response did not contain a diagnosis')
+      }
+      const fixedScript = parsed.fixedScript
+        ? preserveOriginalComments(input.script, parsed.fixedScript)
+        : ''
+      return {
+        ...parsed,
+        fixedScript,
+        modelName: model.name,
+        usedFallback: attemptedModels.length > 1,
+        attemptedModels,
+        failedModels,
+      }
+    } catch (error) {
+      failedModels.push(model.name)
+      failures.push(`${model.name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  throw new AiGenerationError(`All configured AI models failed. ${failures.join(' | ')}`, attemptedModels)
+}
+
