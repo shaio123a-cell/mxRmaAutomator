@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react'
-import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Tooltip, Tabs, Tab } from '@mui/material'
+import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Alert, Tooltip, Tabs, Tab } from '@mui/material'
 import Viewer from './Viewer'
 import DeviceList from '../components/DeviceList'
 import ScriptList from '../components/ScriptList'
@@ -45,6 +45,9 @@ export default function App() {
   const [showDisabled, setShowDisabled] = useState(false)
   const [view, setView] = useState<AppView>('editor')
   const [editorTab, setEditorTab] = useState<'manage' | 'raw'>('manage')
+
+  const [toast, setToast] = useState<{ id: number; message: string; severity: 'success' | 'warning' } | null>(null)
+  const showToast = (message: string, severity: 'success' | 'warning') => setToast({ id: Date.now(), message, severity })
 
   // Resizable split between Devices and Scripts panes
   const [devicePanePct, setDevicePanePct] = useState(() => {
@@ -126,28 +129,33 @@ export default function App() {
   }
 
   const saveConfigFile = async (targetPath: string) => {
-    const { store } = await import('../store/store')
-    const { serializeDevicesWithComments } = await import('../services/serializer')
-    const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
-    const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
-    await window.electronAPI.writeFile(targetPath, text, { maxBackups })
-    const { setDirty } = await import('../store/fbcskmSlice')
-    store.dispatch(setDirty(false))
+    try {
+      const { store } = await import('../store/store')
+      const { serializeDevicesWithComments } = await import('../services/serializer')
+      const text = serializeDevicesWithComments(store.getState().fbcskm.devices, store.getState().fbcskm.originalLines)
+      const maxBackups = store.getState().fbcskm.defaultScriptSettings?.maxBackups ?? 10
+      await window.electronAPI.writeFile(targetPath, text, { maxBackups })
+      const { setDirty } = await import('../store/fbcskmSlice')
+      store.dispatch(setDirty(false))
+      showToast('Configuration saved successfully', 'success')
+    } catch (error) {
+      console.error('Failed to save configuration', error)
+      showToast('Failed to save configuration', 'warning')
+      throw error
+    }
   }
 
   const onSave = async () => {
     if (!filePath) return
-    if (!window.electronAPI) { alert('Save not available in browser mode. Use Save As.'); return }
-    await saveConfigFile(filePath)
-    alert(`Saved with backup rotation.`)
+    if (!window.electronAPI) { showToast('Save not available in browser mode. Use Save As.', 'warning'); return }
+    try { await saveConfigFile(filePath) } catch { /* toast already shown */ }
   }
 
   const onSaveAs = async () => {
     const suggested = filePath || 'config.txt'
     const saveTo = await window.electronAPI.saveFile(suggested)
     if (!saveTo) return
-    await saveConfigFile(saveTo)
-    alert('Exported file saved.')
+    try { await saveConfigFile(saveTo) } catch { /* toast already shown */ }
   }
 
   const filteredDevices = useMemo(() => {
@@ -522,7 +530,7 @@ export default function App() {
           </DialogActions>
         </Dialog>
 
-        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={showToast} />
         <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
         {/* Load unsaved changes confirmation dialog for file open */}
         <Dialog open={loadUnsavedOpen} onClose={() => setLoadUnsavedOpen(false)}>
@@ -572,6 +580,23 @@ export default function App() {
 
         {/* Snack for clipboard actions */}
         <Snackbar open={Boolean(clipMsg)} autoHideDuration={2000} onClose={() => setClipMsg(null)} message={clipMsg || ''} />
+
+        <Snackbar
+          key={toast?.id}
+          open={Boolean(toast)}
+          autoHideDuration={2000}
+          onClose={() => setToast(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert
+            onClose={() => setToast(null)}
+            severity={toast?.severity || 'success'}
+            variant='filled'
+            sx={{ py: 0.5, px: 1.5, fontSize: '0.875rem', alignItems: 'center' }}
+          >
+            {toast?.message || ''}
+          </Alert>
+        </Snackbar>
 
       </Stack>
       )}

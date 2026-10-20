@@ -7,6 +7,8 @@ import React, {
   useRef
 } from 'react'
 import { Drawer, Box, Stack, Typography, TextField, Button, Grid } from '@mui/material'
+import CloseIcon from '@mui/icons-material/Close'
+import SaveIcon from '@mui/icons-material/Save'
 import { Device, updateDevice } from '../store/fbcskmSlice'
 import { useAppDispatch } from '../store/store'
 
@@ -238,9 +240,10 @@ export default forwardRef<DeviceFormHandle, Props>(function DeviceForm({ open, d
             </Grid>
 
             <Stack direction='row' spacing={1}>
-              <Button onClick={onClose}>Cancel</Button>
+              <Button startIcon={<CloseIcon />} onClick={onClose}>Cancel</Button>
               <Button
                 variant='contained'
+                startIcon={<SaveIcon />}
                 onClick={save}
                 disabled={!isDirty()}
               >

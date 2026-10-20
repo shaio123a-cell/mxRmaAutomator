@@ -29,6 +29,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
 import RestoreIcon from '@mui/icons-material/Restore'
+import CloseIcon from '@mui/icons-material/Close'
+import SaveIcon from '@mui/icons-material/Save'
 import { useAppDispatch, useAppSelector } from '../store/store'
 import {
   setActiveSystemPromptId,
@@ -80,7 +82,7 @@ function modelTestSignature(model: AIModelConfig): string {
   })
 }
 
-export default function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: (message: string, severity: 'success' | 'warning') => void }) {
   const dispatch = useAppDispatch()
   const defaults = useAppSelector(state => state.fbcskm.defaultDeviceSettings || {})
   const scriptDefaults = useAppSelector(state => state.fbcskm.defaultScriptSettings) || ({} as DefaultScriptSettings)
@@ -188,28 +190,35 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
         : [...prompts, prompt]
     }
     const nextActivePromptId = resolveActivePromptId(nextPrompts, activePromptId)
-    dispatch(setDefaultDeviceSettings({
-      port: port === '' || port === null ? null : Number(port),
-      connectionTimeoutMs: timeoutMs === '' || timeoutMs === null ? null : Number(timeoutMs),
-      connectionPollSec: pollSec === '' || pollSec === null ? null : Number(pollSec),
-      username,
-      password,
-      publicKeyPath,
-      privateKeyPath,
-      passphrase,
-    }))
-    dispatch(setDefaultScriptSettings({
-      matrixKBPath: matrixPath || '/opt/matrixkb/restmon',
-      genericPath: genericPath || matrixPath || '/opt/matrixkb/restmon',
-      isRestmonDefault,
-      maxBackups: Number(maxBackups),
-    }))
-    dispatch(setAiModels(models))
-    dispatch(setSystemPrompts(nextPrompts))
-    dispatch(setActiveSystemPromptId(nextActivePromptId))
-    dispatch(setThemePreference(theme))
+    try {
+      dispatch(setDefaultDeviceSettings({
+        port: port === '' || port === null ? null : Number(port),
+        connectionTimeoutMs: timeoutMs === '' || timeoutMs === null ? null : Number(timeoutMs),
+        connectionPollSec: pollSec === '' || pollSec === null ? null : Number(pollSec),
+        username,
+        password,
+        publicKeyPath,
+        privateKeyPath,
+        passphrase,
+      }))
+      dispatch(setDefaultScriptSettings({
+        matrixKBPath: matrixPath || '/opt/matrixkb/restmon',
+        genericPath: genericPath || matrixPath || '/opt/matrixkb/restmon',
+        isRestmonDefault,
+        maxBackups: Number(maxBackups),
+      }))
+      dispatch(setAiModels(models))
+      dispatch(setSystemPrompts(nextPrompts))
+      dispatch(setActiveSystemPromptId(nextActivePromptId))
+      dispatch(setThemePreference(theme))
+    } catch (error) {
+      console.error('Failed to save settings', error)
+      onSaved?.('Failed to save settings', 'warning')
+      return
+    }
     setConfirmOpen(false)
     onClose()
+    onSaved?.('Settings saved successfully', 'success')
   }
 
   const requestClose = () => {
@@ -506,8 +515,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={requestClose}>Cancel</Button>
-          <Button variant='contained' onClick={() => { if (isPromptDraftDirty()) setConfirmOpen(true); else save(false) }}>Save Changes</Button>
+          <Button startIcon={<CloseIcon />} onClick={requestClose}>Cancel</Button>
+          <Button variant='contained' startIcon={<SaveIcon />} onClick={() => { if (isPromptDraftDirty()) setConfirmOpen(true); else save(false) }}>Save Changes</Button>
         </DialogActions>
       </Dialog>
 

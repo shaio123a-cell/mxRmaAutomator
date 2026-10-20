@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
-import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Checkbox, Divider, Drawer, FormControlLabel, Grid, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, Divider, Drawer, FormControlLabel, Grid, IconButton, MenuItem, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import CloseIcon from '@mui/icons-material/Close'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
@@ -13,6 +13,7 @@ import config, { FieldConfig } from '../config'
 import { TimePicker } from '@mui/x-date-pickers'
 import dayjs from 'dayjs'
 import DryRunResultsDialog, { DryRunResults } from './DryRunResultsDialog'
+import PayloadEditor, { minifyPayload } from './PayloadEditor'
 import { buildDryRunCommands, buildEncodedArgs } from '../utils/scriptArgs'
 
 export type ScriptFormHandle = {
@@ -74,6 +75,8 @@ export default forwardRef<ScriptFormHandle, Props>(
     const [headersError, setHeadersError] = useState(false)
     const [payloadError, setPayloadError] = useState(false)
     const [scriptNameError, setScriptNameError] = useState(false)
+    const [toast, setToast] = useState<{ id: number; message: string; severity: 'success' | 'warning' } | null>(null)
+    const notify = (message: string, severity: 'success' | 'warning') => setToast({ id: Date.now(), message, severity })
 
     // Per-browser accordion expand/collapse preferences, restored on every open.
     const [expandedSections, setExpandedSections] = useState<AccordionState>(readAccordionState)
@@ -109,9 +112,24 @@ export default forwardRef<ScriptFormHandle, Props>(
 
     useEffect(() => { setScriptNameError(!validateScriptName(draft.instanceName || '')) }, [draft.instanceName])
 
+    const withOneLinePayload = (source: ScriptInstance): ScriptInstance => {
+      if (!source || typeof source.args !== 'object' || !source.args) return source
+      const args = source.args as any
+      if (typeof args.payload !== 'string') return source
+      const payload = minifyPayload(args.payload, args.outputFormat || 'json')
+      if (payload === args.payload) return source
+      return { ...source, args: { ...args, payload } }
+    }
+
     useImperativeHandle(ref, () => ({
       isDirty: () => JSON.stringify(draft) !== JSON.stringify(script),
-      save: () => { dispatch(updateScript({ deviceId: device.id, script: draft })); onChange(draft) },
+      save: () => {
+        const next = withOneLinePayload(draft)
+        dispatch(updateScript({ deviceId: device.id, script: next }))
+        setDraft(next)
+        onChange(next)
+        notify('Script instance saved successfully', 'success')
+      },
       discard: () => setDraft(script)
     }), [draft, script, device, dispatch, onChange])
 
@@ -176,11 +194,14 @@ export default forwardRef<ScriptFormHandle, Props>(
 
     const save = () => {
       if (scriptNameError || headersError || payloadError) {
-        alert('Please fix validation errors before saving')
+        notify('Script not saved — fix validation errors', 'warning')
         return
       }
-      dispatch(updateScript({ deviceId: device.id, script: draft }))
-      onChange(draft)
+      const next = withOneLinePayload(draft)
+      dispatch(updateScript({ deviceId: device.id, script: next }))
+      setDraft(next)
+      onChange(next)
+      notify('Script instance saved successfully', 'success')
     }
 
     const runDryRun = async () => {
@@ -264,14 +285,13 @@ export default forwardRef<ScriptFormHandle, Props>(
       if (field.name === 'payload') {
         return (
           <Grid item xs={12} key={field.name}>
-            <TextField
+            <PayloadEditor
               label={field.label}
-              fullWidth
-              size='small'
-              value={value}
-              onChange={e => { set(field.name, e.target.value); setPayloadError(!validatePayload(e.target.value, draft.args.outputFormat || 'json')) }}
+              format={draft.args.outputFormat || 'json'}
+              value={String(value ?? '')}
               error={payloadError}
               helperText={payloadError ? `Invalid ${draft.args.outputFormat || 'json'} format` : ''}
+              onChange={(next) => { set(field.name, next); setPayloadError(!validatePayload(next, draft.args.outputFormat || 'json')) }}
             />
           </Grid>
         )
@@ -545,9 +565,27 @@ export default forwardRef<ScriptFormHandle, Props>(
         <Box sx={{ display: 'flex', gap: 1, p: 2, backgroundColor: 'background.paper' }}>
           <Button variant='outlined' startIcon={<ScienceIcon />} onClick={runDryRun}>Dry Run</Button>
           <Button variant='contained' startIcon={<SaveIcon />} onClick={save}>Save Script</Button>
+          <Button variant='text' startIcon={<CloseIcon />} onClick={onClose}>Cancel</Button>
         </Box>
 
         <DryRunResultsDialog open={dryRunOpen} onClose={() => setDryRunOpen(false)} results={dryRunResults} />
+
+        <Snackbar
+          key={toast?.id}
+          open={Boolean(toast)}
+          autoHideDuration={2000}
+          onClose={() => setToast(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert
+            onClose={() => setToast(null)}
+            severity={toast?.severity || 'success'}
+            variant='filled'
+            sx={{ py: 0.5, px: 1.5, fontSize: '0.875rem', alignItems: 'center' }}
+          >
+            {toast?.message || ''}
+          </Alert>
+        </Snackbar>
       </Drawer>
     )
   })
