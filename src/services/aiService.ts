@@ -1,5 +1,9 @@
 import type { AIModelConfig as ConfigAIModelConfig, AISystemPrompt as ConfigAISystemPrompt } from '../config'
 import config from '../config'
+import { buildScriptInstanceAssistantPrompt } from '../content/scriptInstanceAssistantPrompt'
+import type { ScriptInstance } from '../store/fbcskmSlice'
+import { sanitizeInstanceForAi, type ScriptInstanceAiUpdate } from '../utils/scriptInstanceAiUpdates'
+import type { ValidationIssue } from '../utils/scriptInstanceValidation'
 import { hashScriptContent } from '../utils/contentHash'
 import { preserveOriginalComments } from '../utils/preserveComments'
 
@@ -48,6 +52,37 @@ export interface AiDiagnosis {
   risks: string[]
   confidence: 'high' | 'medium' | 'low'
   needsUserInput: string[]
+  rawResponse: string
+  modelName: string
+  usedFallback: boolean
+  attemptedModels: string[]
+  failedModels: string[]
+}
+
+export type ScriptInstanceAiMode = 'review' | 'fix' | 'configure'
+
+export interface ScriptInstanceAiInput {
+  mode: ScriptInstanceAiMode
+  instance: ScriptInstance
+  deviceName?: string
+  validationIssues?: ValidationIssue[]
+  request?: string
+}
+
+export interface ScriptInstanceAiIssue {
+  field?: string
+  severity: 'error' | 'warning' | 'info'
+  message: string
+  suggestion?: string
+}
+
+export interface ScriptInstanceAiResult {
+  summary: string
+  assessment: 'valid' | 'needs_attention' | 'invalid'
+  issues: ScriptInstanceAiIssue[]
+  updates: ScriptInstanceAiUpdate[]
+  needsUserInput: string[]
+  confidence: 'high' | 'medium' | 'low'
   rawResponse: string
   modelName: string
   usedFallback: boolean
@@ -414,6 +449,254 @@ async function requestModel(model: AiModelConfig, prompt: string, systemPrompt: 
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function normalizeAiSeverity(value: unknown): ScriptInstanceAiIssue['severity'] {
+  const severity = asText(value).toLowerCase()
+  return severity === 'error' || severity === 'warning' ? severity : 'info'
+}
+
+function normalizeAiConfidence(value: unknown): 'high' | 'medium' | 'low' {
+  const confidence = asText(value).toLowerCase()
+  return confidence === 'high' || confidence === 'low' ? confidence : 'medium'
+}
+
+function normalizeAiAssessment(value: unknown, issues: ScriptInstanceAiIssue[]): 'valid' | 'needs_attention' | 'invalid' {
+  const assessment = asText(value).toLowerCase()
+  if (assessment === 'valid' || assessment === 'needs_attention' || assessment === 'invalid') return assessment
+  if (issues.some(issue => issue.severity === 'error')) return 'invalid'
+  if (issues.some(issue => issue.severity === 'warning')) return 'needs_attention'
+  return 'valid'
+}
+
+function parseScriptInstanceAiResponse(response: string): Omit<ScriptInstanceAiResult, 'modelName' | 'usedFallback' | 'attemptedModels' | 'failedModels'> {
+  const jsonText = extractJsonObject(response)
+  if (!jsonText) throw new Error('AI response did not contain a JSON object.')
+
+  let parsed: any
+  try {
+    parsed = JSON.parse(jsonText)
+  } catch {
+    throw new Error('AI response contained invalid JSON.')
+  }
+  if (!parsed || typeof parsed !== 'object') throw new Error('AI response was not a JSON object.')
+
+  const issues: ScriptInstanceAiIssue[] = Array.isArray(parsed.issues)
+    ? parsed.issues
+      .filter((issue: unknown): issue is Record<string, unknown> => Boolean(issue && typeof issue === 'object'))
+      .map((issue: Record<string, unknown>) => ({
+        field: asText(issue.field) || undefined,
+        severity: normalizeAiSeverity(issue.severity),
+        message: asText(issue.message),
+        suggestion: asText(issue.suggestion) || undefined,
+      }))
+      .filter(issue => Boolean(issue.message))
+    : []
+
+  const updates: ScriptInstanceAiUpdate[] = Array.isArray(parsed.updates)
+    ? parsed.updates
+      .filter((update: unknown): update is Record<string, unknown> => Boolean(update && typeof update === 'object' && typeof (update as Record<string, unknown>).field === 'string'))
+      .map((update: Record<string, unknown>) => ({
+        field: asText(update.field).trim(),
+        value: update.value,
+        reason: asText(update.reason) || undefined,
+      }))
+      .filter(update => Boolean(update.field))
+    : []
+
+  const needsUserInput = parseActionItems(parsed.needsUserInput ?? parsed.needs_user_input ?? parsed.needsInput)
+  const summary = asText(parsed.summary ?? parsed.explanation)
+  if (!summary && !issues.length && !updates.length && !needsUserInput.length) {
+    throw new Error('AI response did not contain any Script Instance guidance.')
+  }
+
+  return {
+    summary,
+    assessment: normalizeAiAssessment(parsed.assessment, issues),
+    issues,
+    updates,
+    needsUserInput,
+    confidence: normalizeAiConfidence(parsed.confidence),
+    rawResponse: response,
+  }
+}
+
+function buildScriptInstanceAssistantUserPrompt(input: ScriptInstanceAiInput, sanitizedInstance: Record<string, unknown>): string {
+  const validation = (input.validationIssues ?? [])
+    .map(issue => `- [${issue.severity}] ${issue.field ? `${issue.field}: ` : ''}${issue.message}`)
+    .join('\n')
+  const request = input.request?.trim()
+
+  return [
+    `Mode: ${input.mode}`,
+    `Device: ${input.deviceName || '(not provided)'}`,
+    request ? `User request:\n${request}` : '',
+    'CURRENT INSTANCE (secrets redacted):',
+    '```json',
+    JSON.stringify(sanitizedInstance, null, 2),
+    '```',
+    'LOCAL VALIDATION FINDINGS:',
+    validation || '- none',
+    'Return only the JSON object described in the system instructions.',
+  ].filter(Boolean).join('\n')
+}
+
+function mockScriptInstanceAssistantResponse(input: ScriptInstanceAiInput): string {
+  const updates = new Map<string, ScriptInstanceAiUpdate>()
+  const addUpdate = (field: string, value: unknown, reason: string) => {
+    if (!updates.has(field)) updates.set(field, { field, value, reason })
+  }
+  const instance = input.instance
+  const args = instance.args && typeof instance.args === 'object' ? instance.args as Record<string, unknown> : {}
+  const localIssues = input.validationIssues ?? []
+
+  if (input.mode === 'fix') {
+    const instanceName = String(instance.instanceName ?? '')
+    const cleanName = instanceName.replace(/[!@#$%^&*|]/g, '').trim()
+    if (cleanName !== instanceName && cleanName) addUpdate('instanceName', cleanName, 'Removed characters that are not allowed in an instance name.')
+
+    if (instance.isRestmon) {
+      const format = String(args.outputFormat || 'json').toLowerCase()
+      const payload = String(args.payload ?? '')
+      if (format === 'json' && payload.trim()) {
+        try {
+          JSON.parse(payload)
+        } catch {
+          addUpdate('payload', '{}', 'Replaced an invalid JSON payload with an empty JSON object.')
+        }
+      }
+      const headers = String(args.headers ?? '').trim()
+      if (headers && !(headers.startsWith('@{') && headers.endsWith('}'))) {
+        addUpdate('headers', '@{"Content-Type"="application/json"}', 'Replaced a malformed headers value with a valid PowerShell hashtable.')
+      }
+      const method = String(args.method || '').toUpperCase()
+      if ((method === 'GET' || method === 'HEAD') && payload.trim()) {
+        addUpdate('method', 'POST', 'GET and HEAD requests should not send a payload.')
+      }
+    }
+
+    const poll = Number(instance.pollIntervalSec)
+    const timeout = Number(instance.timeoutSec)
+    if (Number.isFinite(poll) && Number.isFinite(timeout) && poll > 0 && timeout >= poll) {
+      addUpdate('timeoutSec', Math.max(1, Math.floor(poll / 2)), 'Made the timeout shorter than the poll interval.')
+    }
+  }
+
+  if (input.mode === 'configure') {
+    const request = input.request || ''
+    const lower = request.toLowerCase()
+    if (instance.isRestmon) {
+      const url = request.match(/https?:\/\/[^\s,'"]+/i)?.[0]
+      if (url) addUpdate('url', url, 'Used the URL from the request.')
+
+      const method = request.match(/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/i)?.[1]?.toUpperCase()
+      if (method) addUpdate('method', method, 'Used the HTTP method from the request.')
+
+      const format = lower.match(/\b(json|xml|text)\b/)?.[1]
+      if (format) addUpdate('outputFormat', format, 'Used the output format from the request.')
+    }
+
+    const every = lower.match(/every\s+(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\b/)
+    if (every) {
+      const amount = Number(every[1])
+      const unit = every[2]
+      const seconds = unit.startsWith('h') ? amount * 3600 : unit.startsWith('m') ? amount * 60 : amount
+      if (seconds > 0) addUpdate('pollIntervalSec', seconds, 'Set the poll interval from the request.')
+    }
+
+    const timeout = lower.match(/timeout\s+(?:of\s+)?(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b/)
+    if (timeout) {
+      const amount = Number(timeout[1])
+      const unit = timeout[2]
+      const seconds = unit.startsWith('m') ? amount * 60 : amount
+      if (seconds > 0) addUpdate('timeoutSec', seconds, 'Set the timeout from the request.')
+    }
+
+    const times = request.match(/\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g)
+    if (times?.length) {
+      addUpdate('scriptStartTime', times[0].padStart(5, '0'), 'Set the schedule start time from the request.')
+      if (times[1]) addUpdate('scriptEndTime', times[1].padStart(5, '0'), 'Set the schedule end time from the request.')
+      addUpdate('scriptSchedulingEnable', true, 'Enabled scheduling because the request included a time window.')
+    }
+
+    const days = ['scriptSunday', 'scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday']
+    if (/\bweekdays?\b/.test(lower)) {
+      days.forEach(day => addUpdate(day, day !== 'scriptSunday' && day !== 'scriptSaturday', 'Applied the weekday schedule from the request.'))
+      addUpdate('scriptSchedulingEnable', true, 'Enabled scheduling because the request included weekdays.')
+    } else if (/\bweekends?\b/.test(lower)) {
+      days.forEach(day => addUpdate(day, day === 'scriptSunday' || day === 'scriptSaturday', 'Applied the weekend schedule from the request.'))
+      addUpdate('scriptSchedulingEnable', true, 'Enabled scheduling because the request included weekends.')
+    } else if (/\b(daily|every day|all days)\b/.test(lower)) {
+      days.forEach(day => addUpdate(day, true, 'Applied the daily schedule from the request.'))
+      addUpdate('scriptSchedulingEnable', true, 'Enabled scheduling because the request included daily execution.')
+    }
+  }
+
+  const updatesArray = [...updates.values()]
+  const issues = localIssues.map(issue => ({
+    field: issue.field,
+    severity: issue.severity,
+    message: issue.message,
+    suggestion: issue.suggestion,
+  }))
+  const hasErrors = issues.some(issue => issue.severity === 'error')
+  const hasWarnings = issues.some(issue => issue.severity === 'warning')
+  const modeSummary = input.mode === 'review'
+    ? `Mock review found ${issues.length} local validation finding${issues.length === 1 ? '' : 's'}.`
+    : input.mode === 'fix'
+      ? `Mock fix prepared ${updatesArray.length} change${updatesArray.length === 1 ? '' : 's'} for review.`
+      : `Mock configuration prepared ${updatesArray.length} field change${updatesArray.length === 1 ? '' : 's'}.`
+
+  return JSON.stringify({
+    summary: modeSummary,
+    assessment: hasErrors ? 'invalid' : hasWarnings || localIssues.length ? 'needs_attention' : 'valid',
+    issues,
+    updates: updatesArray,
+    needsUserInput: [],
+    confidence: 'medium',
+  })
+}
+
+export async function assistScriptInstance(
+  input: ScriptInstanceAiInput,
+  models: AiModelConfig[] = [],
+): Promise<ScriptInstanceAiResult> {
+  if (!input.instance) throw new Error('There is no Script Instance to review.')
+  if (input.mode === 'configure' && !input.request?.trim()) {
+    throw new Error('Enter a configuration request before using Configure with AI.')
+  }
+
+  const chain = getFallbackChain(models)
+  if (!chain.length) throw new Error('No AI models are enabled. Configure at least one model in Settings.')
+
+  const instructions = buildScriptInstanceAssistantPrompt()
+  const sanitizedInstance = sanitizeInstanceForAi(input.instance)
+  const userPrompt = buildScriptInstanceAssistantUserPrompt(input, sanitizedInstance)
+  const attemptedModels: string[] = []
+  const failedModels: string[] = []
+  const failures: string[] = []
+
+  for (const model of chain) {
+    attemptedModels.push(model.name)
+    try {
+      const response = model.provider === 'mock'
+        ? mockScriptInstanceAssistantResponse(input)
+        : await requestModel(model, userPrompt, instructions)
+      const parsed = parseScriptInstanceAiResponse(response)
+      return {
+        ...parsed,
+        modelName: model.name,
+        usedFallback: attemptedModels.length > 1,
+        attemptedModels,
+        failedModels,
+      }
+    } catch (error) {
+      failedModels.push(model.name)
+      failures.push(`${model.name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  throw new AiGenerationError(`All configured AI models failed. ${failures.join(' | ')}`, attemptedModels)
 }
 
 export async function testAiModel(model: AiModelConfig, systemPrompt = getActiveSystemPrompt()): Promise<void> {

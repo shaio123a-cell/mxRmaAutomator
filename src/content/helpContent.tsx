@@ -244,6 +244,21 @@ export const helpSections: HelpSection[] = [
         ],
       },
       {
+        id: 'ai-assist',
+        title: 'AI Assist for script instances',
+        keywords: ['ai', 'assist', 'review', 'fix', 'configure', 'sidecar', 'validation chip', 'apply', 'undo'],
+        bullets: [
+          'Open AI Assist from the editor header, or click the validation chip to review errors and warnings.',
+          'Review with AI checks the open draft; Fix with AI proposes the smallest safe corrections.',
+          'Configure with AI turns a plain-language request into field updates you can preview before applying.',
+          'Apply changes only updates the open draft. Save Script is still required to persist them.',
+          'If the form changes after a response arrives, generate again before applying; stale results are disabled.',
+          'The password is never sent. Secret header and argument values are masked, and AI cannot change isRestmon.',
+          'The built-in assistant prompt is read-only in Configuration so the UI and AI request stay aligned.',
+        ],
+        warning: 'AI suggestions are not applied automatically. Review every diff before applying, then verify by saving and dry running.',
+      },
+      {
         id: 'script-fields',
         title: 'Script instance fields',
         keywords: ['fields', 'reference', 'payload', 'headers', 'poll', 'timeout'],
@@ -517,6 +532,16 @@ export const helpSections: HelpSection[] = [
           'The active system prompt is sent with every AI request.',
           'Create or edit prompts, then select Use to make one active.',
           'Restore system defaults replaces bundled prompts while keeping your own extra prompts.',
+        ],
+      },
+      {
+        id: 'built-in-skills',
+        title: 'Built-in AI skills',
+        keywords: ['built-in', 'skill', 'read-only', 'prompt', 'script instance assistant'],
+        bullets: [
+          'Built-in AI skills are shipped prompts used by features such as AI Assist for script instances.',
+          'They are read-only in the Configuration dialog so the visible behavior and the AI request stay aligned.',
+          'Developer prompt updates are made in config.json and take effect after a rebuild or repackage.',
         ],
       },
       {

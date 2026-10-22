@@ -39,9 +39,17 @@ export interface AISystemPrompt {
   content: string
 }
 
+export interface AIBuiltInSkill {
+  id: string
+  name: string
+  description?: string
+  content: string
+}
+
 export interface AIConfig {
   models: AIModelConfig[]
   systemPrompts: AISystemPrompt[]
+  builtInSkills?: AIBuiltInSkill[]
   activeSystemPromptId: string | null
 }
 

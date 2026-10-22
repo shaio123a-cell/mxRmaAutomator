@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Accordion,
   AccordionDetails,
@@ -40,11 +40,12 @@ import {
   setSystemPrompts,
   setThemePreference,
 } from '../store/fbcskmSlice'
-import type { AIModelConfig, AISystemPrompt } from '../config'
+import type { AIBuiltInSkill, AIModelConfig, AISystemPrompt } from '../config'
 import config from '../config'
 import type { DefaultScriptSettings } from '../store/fbcskmSlice'
 import type { ThemePreference } from '../theme'
 import { fetchProviderModels, testAiModel } from '../services/aiService'
+import { buildScriptInstanceAssistantPrompt, SCRIPT_INSTANCE_ASSISTANT_SKILL_ID } from '../content/scriptInstanceAssistantPrompt'
 
 const newModel = (): AIModelConfig => ({
   id: '',
@@ -70,6 +71,15 @@ const providerBaseUrls: Record<AIModelConfig['provider'], string> = {
 
 const newPrompt = (): AISystemPrompt => ({ id: '', name: '', content: '' })
 
+export type SettingsSection =
+  | 'appearance'
+  | 'device-defaults'
+  | 'script-defaults'
+  | 'ai-models'
+  | 'system-prompts'
+  | 'built-in-skills'
+  | 'backup'
+
 type ModelTestResult = { signature: string; passed: boolean }
 
 function modelTestSignature(model: AIModelConfig): string {
@@ -82,7 +92,7 @@ function modelTestSignature(model: AIModelConfig): string {
   })
 }
 
-export default function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: (message: string, severity: 'success' | 'warning') => void }) {
+export default function SettingsDialog({ open, onClose, onSaved, initialSection }: { open: boolean; onClose: () => void; onSaved?: (message: string, severity: 'success' | 'warning') => void; initialSection?: SettingsSection | null }) {
   const dispatch = useAppDispatch()
   const defaults = useAppSelector(state => state.fbcskm.defaultDeviceSettings || {})
   const scriptDefaults = useAppSelector(state => state.fbcskm.defaultScriptSettings) || ({} as DefaultScriptSettings)
@@ -118,6 +128,19 @@ export default function SettingsDialog({ open, onClose, onSaved }: { open: boole
   const [draftTestResult, setDraftTestResult] = useState<ModelTestResult | null>(null)
   const [isTestingDraft, setIsTestingDraft] = useState(false)
   const [theme, setTheme] = useState<ThemePreference>('system')
+  const [builtInExpanded, setBuiltInExpanded] = useState(false)
+  const builtInRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setBuiltInExpanded(false)
+      return
+    }
+    if (initialSection !== 'built-in-skills') return
+    setBuiltInExpanded(true)
+    const timer = window.setTimeout(() => builtInRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150)
+    return () => window.clearTimeout(timer)
+  }, [open, initialSection])
 
   useEffect(() => {
     if (!open) return
@@ -341,6 +364,9 @@ export default function SettingsDialog({ open, onClose, onSaved }: { open: boole
   }
 
   const sectionSx = { '&:before': { display: 'none' }, border: '1px solid', borderColor: 'divider', borderRadius: '4px !important', boxShadow: 'none', backgroundColor: 'background.paper' }
+  const builtInSkills = config.ai?.builtInSkills ?? []
+  const builtInSkillContent = (skill: AIBuiltInSkill) =>
+    skill.id === SCRIPT_INSTANCE_ASSISTANT_SKILL_ID ? buildScriptInstanceAssistantPrompt() : skill.content
 
   return (
     <>
@@ -498,6 +524,37 @@ export default function SettingsDialog({ open, onClose, onSaved }: { open: boole
                   <TextField label='Prompt name' value={promptDraft.name} onChange={event => setPromptDraft({ ...promptDraft, name: event.target.value })} size='small' fullWidth />
                   <TextField label='System prompt content' value={promptDraft.content} onChange={event => setPromptDraft({ ...promptDraft, content: event.target.value })} multiline minRows={5} fullWidth />
                   <Box><Button variant='contained' onClick={savePrompt}>Save Prompt</Button><Button sx={{ ml: 1 }} onClick={() => setPromptDraft(newPrompt())}>Reset</Button></Box>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+
+            <Accordion ref={builtInRef} expanded={builtInExpanded} onChange={(_event, expanded) => setBuiltInExpanded(expanded)} sx={sectionSx}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}><Typography fontWeight={600}>Built-in AI Skills</Typography></AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={1.5}>
+                  <Typography variant='body2' color='text.secondary'>
+                    Read-only prompts shipped with the application. They stay aligned with the AI features and update only when a new build replaces config.json.
+                  </Typography>
+                  {builtInSkills.length === 0 ? (
+                    <Typography variant='caption' color='text.secondary'>No built-in AI skills are configured.</Typography>
+                  ) : builtInSkills.map(skill => (
+                    <Box key={skill.id} sx={{ p: 1.25, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                      <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
+                        <Typography fontWeight={600} sx={{ flex: 1 }}>{skill.name}</Typography>
+                        <Chip size='small' label='Built-in · Read-only' variant='outlined' />
+                      </Stack>
+                      {skill.description && <Typography variant='caption' color='text.secondary' sx={{ display: 'block', mb: 1 }}>{skill.description}</Typography>}
+                      <TextField
+                        value={builtInSkillContent(skill)}
+                        multiline
+                        minRows={4}
+                        maxRows={12}
+                        fullWidth
+                        size='small'
+                        InputProps={{ readOnly: true }}
+                      />
+                    </Box>
+                  ))}
                 </Stack>
               </AccordionDetails>
             </Accordion>

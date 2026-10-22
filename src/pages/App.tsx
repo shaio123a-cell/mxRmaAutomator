@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react'
-import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Alert, Tooltip, Tabs, Tab } from '@mui/material'
+import { Box, Button, Chip, Stack, Typography, TextField, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, IconButton, Snackbar, Alert, Tooltip, Tabs, Tab, Menu, MenuItem, Divider, ListItemText, ListSubheader } from '@mui/material'
 import Viewer from './Viewer'
 import DeviceList from '../components/DeviceList'
 import ScriptList from '../components/ScriptList'
@@ -10,13 +10,18 @@ import { useAppDispatch, useAppSelector } from '../store/store'
 import { parseFBCSKM } from '../store/fbcskmSlice'
 
 import ErrorBoundary from '../components/ErrorBoundary'
-import SettingsDialog from '../components/SettingsDialog'
+import SettingsDialog, { type SettingsSection } from '../components/SettingsDialog'
 import HelpDialog from '../components/HelpDialog'
 import AgenticScriptPanel from '../components/AgenticScriptPanel'
 import ExecutionHostsView from '../components/ExecutionHostsView'
 import AppShell, { AppView } from '../components/AppShell'
 import BrandHeader from '../components/BrandHeader'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
+import StarIcon from '@mui/icons-material/Star'
+import StarBorderIcon from '@mui/icons-material/StarBorder'
+import HistoryIcon from '@mui/icons-material/History'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import SaveIcon from '@mui/icons-material/Save'
 import SaveAltIcon from '@mui/icons-material/SaveAlt'
 import OpenInBrowserIcon from '@mui/icons-material/OpenInBrowser'
@@ -24,6 +29,10 @@ import LaunchIcon from '@mui/icons-material/Launch'
 import CloseIcon from '@mui/icons-material/Close'
 import DnsIcon from '@mui/icons-material/Dns'
 import DataObjectIcon from '@mui/icons-material/DataObject'
+import {
+  clearRecentFiles, fileBaseName, fileDirName, getFavoriteFiles, getRecentFiles, isFavoriteFile,
+  recordRecentFile, removeRecentFile, toggleFavoriteFile, MAX_FAVORITES, type ConfigFileEntry,
+} from '../utils/recentFiles'
 
 export default function App() {
   // Global error logging to help capture runtime issues in dev
@@ -36,12 +45,17 @@ export default function App() {
   }, [])
 
   const [filePath, setFilePath] = useState<string | null>(null)
+  const [loadMenuAnchor, setLoadMenuAnchor] = useState<HTMLElement | null>(null)
+  const [recentMenuAnchor, setRecentMenuAnchor] = useState<HTMLElement | null>(null)
+  const [recentFiles, setRecentFiles] = useState<ConfigFileEntry[]>(() => getRecentFiles())
+  const [favoriteFiles, setFavoriteFiles] = useState<ConfigFileEntry[]>(() => getFavoriteFiles())
   const [raw, setRaw] = useState<string>('')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null)
   const [scriptEditorOpen, setScriptEditorOpen] = useState(false)
   const [deviceFormOpen, setDeviceFormOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [showDisabled, setShowDisabled] = useState(false)
   const [view, setView] = useState<AppView>('editor')
@@ -49,6 +63,14 @@ export default function App() {
 
   const [toast, setToast] = useState<{ id: number; message: string; severity: 'success' | 'warning' } | null>(null)
   const showToast = (message: string, severity: 'success' | 'warning') => setToast({ id: Date.now(), message, severity })
+  const openSettings = (section: SettingsSection | null = null) => {
+    setSettingsSection(section)
+    setSettingsOpen(true)
+  }
+  const closeSettings = () => {
+    setSettingsOpen(false)
+    setSettingsSection(null)
+  }
 
   // Resizable split between Devices and Scripts panes
   const [devicePanePct, setDevicePanePct] = useState(() => {
@@ -112,22 +134,62 @@ export default function App() {
   }, [raw])
   const loadPendingPathRef = React.useRef<string | null>(null)
 
-  const openFile = async () => {
-    const p = await window.electronAPI.openFile()
-    if (!p) return
+  const loadConfigFromPath = async (path: string): Promise<boolean> => {
+    try {
+      const txt = await window.electronAPI.readFile(path)
+      setFilePath(path)
+      setRaw(txt)
+      setRecentFiles(recordRecentFile(path))
+      return true
+    } catch (error) {
+      console.error('Failed to open configuration file', path, error)
+      setRecentFiles(removeRecentFile(path))
+      showToast(`Could not open ${fileBaseName(path)}. It may have been moved or deleted.`, 'warning')
+      return false
+    }
+  }
 
-    // If there are unsaved changes, prompt first
+  const requestLoadPath = async (path: string) => {
     const state = (await import('../store/store')).store.getState()
     if (state.fbcskm.dirty) {
-      loadPendingPathRef.current = p
+      loadPendingPathRef.current = path
       setLoadUnsavedOpen(true)
       return
     }
-
-    const txt = await window.electronAPI.readFile(p)
-    setFilePath(p)
-    setRaw(txt)
+    await loadConfigFromPath(path)
   }
+
+  const closeFileMenus = () => {
+    setLoadMenuAnchor(null)
+    setRecentMenuAnchor(null)
+  }
+
+  const openFile = async () => {
+    closeFileMenus()
+    const p = await window.electronAPI.openFile()
+    if (!p) return
+    await requestLoadPath(p)
+  }
+
+  const toggleCurrentFavorite = () => {
+    if (!filePath) return
+    const result = toggleFavoriteFile(filePath)
+    setFavoriteFiles(getFavoriteFiles())
+    if (result.limitReached) {
+      showToast(`Favorites are limited to ${MAX_FAVORITES}. Remove one before adding another.`, 'warning')
+      return
+    }
+    showToast(result.favorited ? 'Added current file to favorites.' : 'Removed current file from favorites.', 'success')
+  }
+
+  const openFileMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setRecentFiles(getRecentFiles())
+    setFavoriteFiles(getFavoriteFiles())
+    setRecentMenuAnchor(null)
+    setLoadMenuAnchor(event.currentTarget)
+  }
+
+  const currentFileIsFavorite = Boolean(filePath && isFavoriteFile(filePath))
 
   const saveConfigFile = async (targetPath: string) => {
     try {
@@ -156,7 +218,10 @@ export default function App() {
     const suggested = filePath || 'config.txt'
     const saveTo = await window.electronAPI.saveFile(suggested)
     if (!saveTo) return
-    try { await saveConfigFile(saveTo) } catch { /* toast already shown */ }
+    try {
+      await saveConfigFile(saveTo)
+      setRecentFiles(recordRecentFile(saveTo))
+    } catch { /* toast already shown */ }
   }
 
   const filteredDevices = useMemo(() => {
@@ -386,7 +451,7 @@ export default function App() {
     <AppShell
       view={view}
       onViewChange={setView}
-      onOpenSettings={() => setSettingsOpen(true)}
+      onOpenSettings={() => openSettings()}
       onOpenHelp={() => setHelpOpen(true)}
       electronAction={window.electronAPI?.isElectron ? (
         <Tooltip title='Open in Browser' placement='right'>
@@ -429,11 +494,18 @@ export default function App() {
           <BrandHeader />
 
         <Stack direction='row' spacing={1} alignItems='center' sx={{ flexWrap: 'wrap' }}>
-          <Tooltip title='Load Configuration File'>
-            <IconButton color='primary' onClick={openFile} aria-label='load configuration file'>
-              <FolderOpenIcon />
-            </IconButton>
-          </Tooltip>
+          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+            <Tooltip title='Load Configuration File'>
+              <IconButton color='primary' onClick={() => void openFile()} aria-label='load configuration file'>
+                <FolderOpenIcon />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title='Recent and favorite files'>
+              <IconButton color='primary' onClick={openFileMenu} aria-label='recent and favorite configuration files' sx={{ ml: -0.5 }}>
+                <ArrowDropDownIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
           <Tooltip title='Save'>
             <span>
               <IconButton onClick={onSave} disabled={!filePath} aria-label='save'>
@@ -447,8 +519,97 @@ export default function App() {
             </IconButton>
           </Tooltip>
           {isDirty && <Chip label='Unsaved Changes' color='error' size='small' />}
-          {filePath && <Typography sx={{ ml: 1 }} variant='body2' color='text.secondary' component='span'>{filePath}</Typography>}
+          {filePath && (
+            <>
+              <Typography
+                sx={{ ml: 1, maxWidth: 480, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                variant='body2'
+                color='text.secondary'
+                component='span'
+                title={filePath}
+              >
+                {filePath}
+              </Typography>
+              <Tooltip title={currentFileIsFavorite ? 'Remove current file from favorites' : 'Add current file to favorites'}>
+                <IconButton
+                  size='small'
+                  onClick={toggleCurrentFavorite}
+                  aria-label={currentFileIsFavorite ? 'remove current file from favorites' : 'add current file to favorites'}
+                >
+                  {currentFileIsFavorite ? <StarIcon fontSize='small' color='warning' /> : <StarBorderIcon fontSize='small' />}
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
         </Stack>
+
+        <Menu
+          anchorEl={loadMenuAnchor}
+          open={Boolean(loadMenuAnchor)}
+          onClose={closeFileMenus}
+          PaperProps={{ sx: { minWidth: 360, maxWidth: 560 } }}
+        >
+          <MenuItem onClick={() => void openFile()}>
+            <FolderOpenIcon fontSize='small' sx={{ mr: 1.5 }} />
+            Open file…
+          </MenuItem>
+          <Divider />
+          <ListSubheader component='div'>Favorites ({favoriteFiles.length}/{MAX_FAVORITES})</ListSubheader>
+          {favoriteFiles.length === 0 ? (
+            <MenuItem disabled>No favorite files yet</MenuItem>
+          ) : favoriteFiles.map(entry => (
+            <MenuItem key={entry.path} onClick={() => { closeFileMenus(); void requestLoadPath(entry.path) }}>
+              <StarIcon fontSize='small' color='warning' sx={{ mr: 1.5 }} />
+              <ListItemText
+                primary={entry.name || fileBaseName(entry.path)}
+                secondary={fileDirName(entry.path)}
+                primaryTypographyProps={{ noWrap: true }}
+                secondaryTypographyProps={{ noWrap: true, title: entry.path }}
+              />
+            </MenuItem>
+          ))}
+          <Divider />
+          <MenuItem onClick={event => setRecentMenuAnchor(event.currentTarget)}>
+            <HistoryIcon fontSize='small' sx={{ mr: 1.5 }} />
+            Recent files
+            <ChevronRightIcon fontSize='small' sx={{ ml: 'auto' }} />
+          </MenuItem>
+          <Divider />
+          <MenuItem disabled={!filePath} onClick={() => { toggleCurrentFavorite(); closeFileMenus() }}>
+            {currentFileIsFavorite
+              ? <StarIcon fontSize='small' color='warning' sx={{ mr: 1.5 }} />
+              : <StarBorderIcon fontSize='small' sx={{ mr: 1.5 }} />}
+            {currentFileIsFavorite ? 'Remove current file from favorites' : 'Add current file to favorites'}
+          </MenuItem>
+        </Menu>
+
+        <Menu
+          anchorEl={recentMenuAnchor}
+          open={Boolean(recentMenuAnchor)}
+          onClose={() => setRecentMenuAnchor(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          PaperProps={{ sx: { minWidth: 360, maxWidth: 560 } }}
+        >
+          <ListSubheader component='div'>Recent files</ListSubheader>
+          {recentFiles.length === 0 ? (
+            <MenuItem disabled>No recent files</MenuItem>
+          ) : recentFiles.map(entry => (
+            <MenuItem key={entry.path} onClick={() => { closeFileMenus(); void requestLoadPath(entry.path) }}>
+              <ListItemText
+                primary={entry.name || fileBaseName(entry.path)}
+                secondary={fileDirName(entry.path)}
+                primaryTypographyProps={{ noWrap: true }}
+                secondaryTypographyProps={{ noWrap: true, title: entry.path }}
+              />
+            </MenuItem>
+          ))}
+          {recentFiles.length > 0 && (
+            <MenuItem onClick={() => { clearRecentFiles(); setRecentFiles([]) }} sx={{ color: 'text.secondary' }}>
+              Clear recent files
+            </MenuItem>
+          )}
+        </Menu>
 
         <Tabs value={editorTab} onChange={(_, value) => setEditorTab(value)} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
           <Tab value='manage' icon={<DnsIcon fontSize='small' />} iconPosition='start' label='Devices & Scripts' />
@@ -518,6 +679,7 @@ export default function App() {
             script={selectedScript}
             onChange={() => { }}
             onClose={handleScriptEditorClose}
+            onOpenSettings={() => openSettings('built-in-skills')}
           />
         )}
 
@@ -545,39 +707,31 @@ export default function App() {
           <DialogActions>
             <Button onClick={() => { setLoadUnsavedOpen(false); loadPendingPathRef.current = null }}>Cancel</Button>
             <Button color='error' onClick={async () => {
-              // Discard changes and load
               setLoadUnsavedOpen(false)
               const p = loadPendingPathRef.current
               loadPendingPathRef.current = null
               if (!p) return
-              const txt = await window.electronAPI.readFile(p)
-              setFilePath(p)
-              setRaw(txt)
+              await loadConfigFromPath(p)
             }}>Discard Changes</Button>
-            <Button onClick={async () => {
-              // Save in place
+            <Button disabled={!filePath} onClick={async () => {
               const p = loadPendingPathRef.current
               if (!p) return
-              await saveConfigFile(p)
+              await saveConfigFile(filePath as string)
               setLoadUnsavedOpen(false)
-              const txt = await window.electronAPI.readFile(p)
-              setFilePath(p)
-              setRaw(txt)
               loadPendingPathRef.current = null
+              await loadConfigFromPath(p)
             }}>Save in place</Button>
             <Button variant='contained' onClick={async () => {
-              // Export (save as) then load
               const p = loadPendingPathRef.current
               if (!p) return
               const suggested = filePath || 'config.txt'
               const saveTo = await window.electronAPI.saveFile(suggested)
               if (!saveTo) return
               await saveConfigFile(saveTo)
+              setRecentFiles(recordRecentFile(saveTo))
               setLoadUnsavedOpen(false)
-              const txt = await window.electronAPI.readFile(p)
-              setFilePath(p)
-              setRaw(txt)
               loadPendingPathRef.current = null
+              await loadConfigFromPath(p)
             }}>Export</Button>
           </DialogActions>
         </Dialog>
@@ -587,13 +741,13 @@ export default function App() {
 
       </Stack>
       )}
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={showToast} />
+      <SettingsDialog open={settingsOpen} onClose={closeSettings} onSaved={showToast} initialSection={settingsSection} />
       <HelpDialog
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
         onOpenSettings={() => {
           setHelpOpen(false)
-          setSettingsOpen(true)
+          openSettings()
         }}
         onNavigate={target => {
           setHelpOpen(false)

@@ -1,8 +1,9 @@
 
-import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, Divider, Drawer, FormControlLabel, Grid, IconButton, MenuItem, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
+import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, Chip, Divider, Drawer, FormControlLabel, Grid, IconButton, MenuItem, Snackbar, Stack, TextField, Tooltip, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import CloseIcon from '@mui/icons-material/Close'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import LockIcon from '@mui/icons-material/Lock'
 import ScienceIcon from '@mui/icons-material/Science'
@@ -14,8 +15,11 @@ import { TimePicker } from '@mui/x-date-pickers'
 import dayjs from 'dayjs'
 import RunDialog, { RunDialogScript } from './RunDialog'
 import PayloadEditor, { minifyPayload } from './PayloadEditor'
+import ScriptAiAssistant from './ScriptAiAssistant'
 import { buildEncodedArgs, decodeBmcPlaceholders } from '../utils/scriptArgs'
 import { hashScriptContent } from '../utils/contentHash'
+import { getScriptInstanceIssues, getBlockingValidationIssues, validationCounts, type ValidationIssue } from '../utils/scriptInstanceValidation'
+import { applyScriptFieldUpdates, validateAiUpdates, type ScriptInstanceAiUpdate } from '../utils/scriptInstanceAiUpdates'
 
 export type ScriptFormHandle = {
   isDirty: () => boolean
@@ -29,7 +33,26 @@ interface Props {
   script: ScriptInstance
   onChange: (s: ScriptInstance) => void
   onClose: () => void
+  onOpenSettings?: () => void
 }
+
+const SCHEDULE_DAYS = [
+  'scriptSunday',
+  'scriptMonday',
+  'scriptTueday',
+  'scriptWednesday',
+  'scriptThursday',
+  'scriptFriday',
+  'scriptSaturday',
+]
+
+const SCHEDULE_FIELD_NAMES = [
+  'scriptSchedulingEnable',
+  'scriptScheduleDateRegex',
+  ...SCHEDULE_DAYS,
+  'scriptStartTime',
+  'scriptEndTime',
+]
 
 const SECTION_FIELDS: Record<string, string[]> = {
   request: ['url', 'method', 'outputFormat', 'payload', 'headers', 'matchRegex', 'args', 'searchKey', 'searchString'],
@@ -38,6 +61,8 @@ const SECTION_FIELDS: Record<string, string[]> = {
 }
 
 function sectionForField(name: string): string {
+  if (name === 'instanceName' || name === 'scriptPath') return 'identity'
+  if (SCHEDULE_FIELD_NAMES.includes(name)) return 'scheduling'
   for (const [section, names] of Object.entries(SECTION_FIELDS)) {
     if (names.includes(name)) return section
   }
@@ -67,15 +92,15 @@ function readAccordionState(): AccordionState {
 }
 
 export default forwardRef<ScriptFormHandle, Props>(
-  function ScriptForm({ open, device, script, onChange, onClose }, ref) {
+  function ScriptForm({ open, device, script, onChange, onClose, onOpenSettings }, ref) {
     const dispatch = useAppDispatch()
     const [draft, setDraft] = useState<ScriptInstance>(script)
     const [runOpen, setRunOpen] = useState(false)
     const [runScript, setRunScript] = useState<RunDialogScript | null>(null)
+    const [aiOpen, setAiOpen] = useState(false)
+    const [aiChangedFields, setAiChangedFields] = useState<string[]>([])
+    const [aiUndoState, setAiUndoState] = useState<{ before: ScriptInstance; afterSignature: string } | null>(null)
 
-    const [headersError, setHeadersError] = useState(false)
-    const [payloadError, setPayloadError] = useState(false)
-    const [scriptNameError, setScriptNameError] = useState(false)
     const [toast, setToast] = useState<{ id: number; message: string; severity: 'success' | 'warning' } | null>(null)
     const notify = (message: string, severity: 'success' | 'warning') => setToast({ id: Date.now(), message, severity })
 
@@ -87,31 +112,27 @@ export default forwardRef<ScriptFormHandle, Props>(
     const toggleSection = (id: string) => (_event: React.SyntheticEvent, isExpanded: boolean) =>
       setExpandedSections(prev => ({ ...prev, [id]: isExpanded }))
 
-    const validateScriptName = (value: string) => !/[!@#$%^&*|]/.test(value)
-    const validateHeaders = (value: string) => !value || (value.trim().startsWith('@{') && value.trim().endsWith('}'))
-    const validatePayload = (value: string, format: string) => {
-      if (!value.trim()) return true
-      if (format === 'json') {
-        try { JSON.parse(value); return true } catch { return false }
-      } else if (format === 'xml') {
-        try {
-          const parser = new DOMParser()
-          const doc = parser.parseFromString(value, 'text/xml')
-          return !doc.querySelector('parsererror')
-        } catch { return false }
-      }
-      return true
-    }
-
-    useEffect(() => { setDraft(script) }, [script])
+    useEffect(() => {
+      setDraft(script)
+      setAiUndoState(null)
+      setAiChangedFields([])
+    }, [script])
 
     useEffect(() => {
-      if (draft.isRestmon) {
-        setPayloadError(!validatePayload(draft.args.payload || '', draft.args.outputFormat || 'json'))
-      }
-    }, [draft.args.outputFormat, draft.args.payload])
+      if (!aiChangedFields.length) return
+      const timer = window.setTimeout(() => setAiChangedFields([]), 5000)
+      return () => window.clearTimeout(timer)
+    }, [aiChangedFields])
 
-    useEffect(() => { setScriptNameError(!validateScriptName(draft.instanceName || '')) }, [draft.instanceName])
+    const validationIssues = useMemo(
+      () => getScriptInstanceIssues(draft, { existingScripts: device.scripts }),
+      [draft, device.scripts],
+    )
+    const blockingIssues = useMemo(() => getBlockingValidationIssues(validationIssues), [validationIssues])
+    const counts = useMemo(() => validationCounts(validationIssues), [validationIssues])
+    const issueForField = (name: string): ValidationIssue | undefined =>
+      validationIssues.find(issue => issue.field === name && issue.severity === 'error')
+      ?? validationIssues.find(issue => issue.field === name)
 
     const withOneLinePayload = (source: ScriptInstance): ScriptInstance => {
       if (!source || typeof source.args !== 'object' || !source.args) return source
@@ -122,17 +143,72 @@ export default forwardRef<ScriptFormHandle, Props>(
       return { ...source, args: { ...args, payload } }
     }
 
+    const saveDraft = () => {
+      if (blockingIssues.length > 0) {
+        notify('Script not saved — fix validation errors', 'warning')
+        return
+      }
+      const next = withOneLinePayload(draft)
+      dispatch(updateScript({ deviceId: device.id, script: next }))
+      setDraft(next)
+      onChange(next)
+      setAiUndoState(null)
+      setAiChangedFields([])
+      notify('Script instance saved successfully', 'success')
+    }
+
+    const applyAiUpdates = (updates: ScriptInstanceAiUpdate[]) => {
+      const validation = validateAiUpdates(updates, draft)
+      if (!validation.valid) {
+        notify(validation.errors[0] || 'AI changes could not be applied', 'warning')
+        return
+      }
+      const next = withOneLinePayload(applyScriptFieldUpdates(draft, updates))
+      if (JSON.stringify(next) === JSON.stringify(draft)) {
+        notify('AI changes did not modify the draft', 'warning')
+        return
+      }
+      const changed = [...new Set(updates.map(update => update.field))]
+      setAiUndoState({ before: draft, afterSignature: JSON.stringify(next) })
+      setDraft(next)
+      onChange(next)
+      setAiChangedFields(changed)
+      setExpandedSections(previous => {
+        const nextSections = { ...previous }
+        for (const field of changed) nextSections[sectionForField(field)] = true
+        return nextSections
+      })
+      window.setTimeout(() => {
+        const first = changed[0]
+        if (!first) return
+        const targetId = SCHEDULE_FIELD_NAMES.includes(first) ? 'script-section-scheduling' : `script-field-${first}`
+        document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 80)
+      notify(`Applied ${updates.length} AI change${updates.length === 1 ? '' : 's'} to the draft`, 'success')
+    }
+
+    const undoAiChanges = () => {
+      if (!aiUndoState) return
+      if (JSON.stringify(draft) !== aiUndoState.afterSignature) {
+        notify('Cannot undo AI changes after further edits', 'warning')
+        return
+      }
+      setDraft(aiUndoState.before)
+      onChange(aiUndoState.before)
+      setAiUndoState(null)
+      setAiChangedFields([])
+      notify('AI changes undone', 'success')
+    }
+
     useImperativeHandle(ref, () => ({
       isDirty: () => JSON.stringify(draft) !== JSON.stringify(script),
-      save: () => {
-        const next = withOneLinePayload(draft)
-        dispatch(updateScript({ deviceId: device.id, script: next }))
-        setDraft(next)
-        onChange(next)
-        notify('Script instance saved successfully', 'success')
+      save: saveDraft,
+      discard: () => {
+        setDraft(script)
+        setAiUndoState(null)
+        setAiChangedFields([])
       },
-      discard: () => setDraft(script)
-    }), [draft, script, device, dispatch, onChange])
+    }), [draft, script, device, dispatch, onChange, blockingIssues])
 
     const set = (fieldName: string, value: any) => {
       const field = config.scriptUI.allFields.find(f => f.name === fieldName)
@@ -191,18 +267,6 @@ export default forwardRef<ScriptFormHandle, Props>(
 
       if (isCheckbox) return val === '1' || val === 1 || val === true
       return val
-    }
-
-    const save = () => {
-      if (scriptNameError || headersError || payloadError) {
-        notify('Script not saved — fix validation errors', 'warning')
-        return
-      }
-      const next = withOneLinePayload(draft)
-      dispatch(updateScript({ deviceId: device.id, script: next }))
-      setDraft(next)
-      onChange(next)
-      notify('Script instance saved successfully', 'success')
     }
 
     const runDryRun = async () => {
@@ -264,25 +328,38 @@ export default forwardRef<ScriptFormHandle, Props>(
       }
     }
 
+    const aiFieldSx = (name: string) => aiChangedFields.includes(name)
+      ? { outline: '2px solid', outlineColor: 'primary.main', borderRadius: 1, p: 0.5, backgroundColor: 'action.hover' }
+      : undefined
+
     const renderField = (field: FieldConfig) => {
       const value = getValue(field.name)
       const isSelect = field.type === 'select'
       const isTextarea = field.type === 'textarea'
       const isPassword = field.type === 'password'
       const isNumber = field.type === 'number'
+      const fieldIssue = issueForField(field.name)
+      const fieldError = fieldIssue?.severity === 'error'
+      const fieldHelper = fieldIssue?.message || ''
+      const gridProps = {
+        item: true as const,
+        key: field.name,
+        id: `script-field-${field.name}`,
+        sx: aiFieldSx(field.name),
+      }
 
       if (field.name === 'headers') {
         return (
-          <Grid item xs={12} key={field.name}>
+          <Grid {...gridProps} xs={12}>
             <Tooltip title='Example: @{"Content-Type" = "application/json"; "Authorization" = "token"}'>
               <TextField
                 label={field.label}
                 fullWidth
                 size='small'
                 value={value}
-                onChange={e => { set(field.name, e.target.value); setHeadersError(!validateHeaders(e.target.value)) }}
-                error={headersError}
-                helperText={headersError ? 'Invalid format. Must be a PowerShell hashtable like @{"key"="value"}' : ''}
+                onChange={e => set(field.name, e.target.value)}
+                error={fieldError}
+                helperText={fieldHelper}
               />
             </Tooltip>
           </Grid>
@@ -291,14 +368,14 @@ export default forwardRef<ScriptFormHandle, Props>(
 
       if (field.name === 'payload') {
         return (
-          <Grid item xs={12} key={field.name}>
+          <Grid {...gridProps} xs={12}>
             <PayloadEditor
               label={field.label}
               format={draft.args.outputFormat || 'json'}
               value={String(value ?? '')}
-              error={payloadError}
-              helperText={payloadError ? `Invalid ${draft.args.outputFormat || 'json'} format` : ''}
-              onChange={(next) => { set(field.name, next); setPayloadError(!validatePayload(next, draft.args.outputFormat || 'json')) }}
+              error={fieldError}
+              helperText={fieldHelper}
+              onChange={(next) => set(field.name, next)}
             />
           </Grid>
         )
@@ -306,8 +383,8 @@ export default forwardRef<ScriptFormHandle, Props>(
 
       if (field.name === 'password') {
         return (
-          <Grid item xs={12} md={6} lg={4} key={field.name}>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Grid {...gridProps} xs={12} md={6} lg={4}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <TextField
                 label={field.label}
                 type={isPassword ? 'password' : 'text'}
@@ -315,6 +392,8 @@ export default forwardRef<ScriptFormHandle, Props>(
                 size='small'
                 value={value}
                 onChange={e => set(field.name, e.target.value)}
+                error={fieldError}
+                helperText={fieldHelper}
               />
               <Tooltip title='Encrypt password (PowerShell SecureString)'>
                 <IconButton onClick={encryptPass} size='small' color='primary'>
@@ -328,7 +407,7 @@ export default forwardRef<ScriptFormHandle, Props>(
 
       if (field.name === 'decryptPass') {
         return (
-          <Grid item xs={12} md={6} lg={4} key={field.name}>
+          <Grid {...gridProps} xs={12} md={6} lg={4}>
             <TextField
               label={field.label}
               select
@@ -336,6 +415,8 @@ export default forwardRef<ScriptFormHandle, Props>(
               size='small'
               value={value}
               onChange={e => set(field.name, e.target.value)}
+              error={fieldError}
+              helperText={fieldHelper}
             >
               {field.options?.map(option => (
                 <MenuItem key={option} value={option}>{option}</MenuItem>
@@ -349,15 +430,15 @@ export default forwardRef<ScriptFormHandle, Props>(
 
       if (field.name === 'instanceName') {
         return (
-          <Grid item xs={12} md={6} lg={4} key={field.name}>
+          <Grid {...gridProps} xs={12} md={6} lg={4}>
             <TextField
               label={field.label}
               fullWidth
               size='small'
               value={value}
-              onChange={e => { set(field.name, e.target.value); setScriptNameError(!validateScriptName(e.target.value)) }}
-              error={scriptNameError}
-              helperText={scriptNameError ? 'Script name must not contain these characters: !@#$%^&*|' : ''}
+              onChange={e => set(field.name, e.target.value)}
+              error={fieldError}
+              helperText={fieldHelper}
             />
           </Grid>
         )
@@ -365,7 +446,7 @@ export default forwardRef<ScriptFormHandle, Props>(
 
       if (field.type === 'checkbox') {
         return (
-          <Grid item xs={12} md={4} key={field.name}>
+          <Grid {...gridProps} xs={12} md={4}>
             <FormControlLabel
               control={<Checkbox size='small' checked={!!value} onChange={e => set(field.name, e.target.checked)} />}
               label={field.label}
@@ -375,21 +456,28 @@ export default forwardRef<ScriptFormHandle, Props>(
       }
 
       return (
-        <Grid item xs={12} md={
-          field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 :
-            field.name === 'pollIntervalSec' || field.name === 'timeoutSec' ? 6 :
-              6
-        } lg={
-          field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 : 4
-        } key={field.name}>
+        <Grid
+          {...gridProps}
+          xs={12}
+          md={
+            field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 :
+              field.name === 'pollIntervalSec' || field.name === 'timeoutSec' ? 6 :
+                6
+          }
+          lg={
+            field.name === 'url' || field.name === 'payload' || field.name === 'args' || field.name === 'regexField' || field.type === 'textarea' ? 12 : 4
+          }
+        >
           {field.name === 'scriptPath' ? (
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <TextField
                 label={field.label}
                 fullWidth
                 size='small'
                 value={value}
                 onChange={e => set(field.name, e.target.value)}
+                error={fieldError}
+                helperText={fieldHelper}
               />
               <Tooltip title='Browse for script file'>
                 <IconButton size='small' onClick={async () => {
@@ -411,6 +499,8 @@ export default forwardRef<ScriptFormHandle, Props>(
               size='small'
               value={value}
               onChange={e => set(field.name, e.target.value)}
+              error={fieldError}
+              helperText={fieldHelper}
               InputLabelProps={field.type === 'time' ? { shrink: true } : undefined}
             >
               {isSelect && field.options?.map(option => (
@@ -425,8 +515,12 @@ export default forwardRef<ScriptFormHandle, Props>(
     const sectionFields = (names: string[]) =>
       fieldsToShow.filter(f => names.includes(f.name)).map(renderField)
 
+    const changedScheduleDays = aiChangedFields.some(field => SCHEDULE_DAYS.includes(field))
+    const changedScheduleTimes = aiChangedFields.some(field => field === 'scriptStartTime' || field === 'scriptEndTime')
+    const changedBoxSx = { outline: '2px solid', outlineColor: 'primary.main' }
+
     const schedulingSection = (
-      <Accordion expanded={expandedSections.scheduling} onChange={toggleSection('scheduling')} disableGutters>
+      <Accordion id='script-section-scheduling' expanded={expandedSections.scheduling} onChange={toggleSection('scheduling')} disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography fontWeight={600}>Scheduling</Typography>
         </AccordionSummary>
@@ -434,10 +528,10 @@ export default forwardRef<ScriptFormHandle, Props>(
           <Grid container spacing={2}>
             {fieldsToShow.filter(f => f.name === 'scriptSchedulingEnable' || f.name === 'scriptScheduleDateRegex').map(renderField)}
             <Grid item xs={12} md={6}>
-              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, height: '100%' }}>
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, height: '100%', ...(changedScheduleDays ? changedBoxSx : {}) }}>
                 <Typography variant='subtitle2' gutterBottom>Run Days</Typography>
                 <Stack>
-                  {['scriptSunday', 'scriptMonday', 'scriptTueday', 'scriptWednesday', 'scriptThursday', 'scriptFriday', 'scriptSaturday'].map(dayName => {
+                  {SCHEDULE_DAYS.map(dayName => {
                     const f = config.scriptUI.allFields.find(field => field.name === dayName);
                     if (!f) return null;
                     return (
@@ -453,7 +547,7 @@ export default forwardRef<ScriptFormHandle, Props>(
               </Box>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, height: '100%' }}>
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, height: '100%', ...(changedScheduleTimes ? changedBoxSx : {}) }}>
                 <Typography variant='subtitle2' gutterBottom>Operating Window</Typography>
                 <Stack spacing={2} sx={{ mt: 1 }}>
                   <TimePicker
@@ -478,100 +572,151 @@ export default forwardRef<ScriptFormHandle, Props>(
       </Accordion>
     )
 
+    const validityLabel = counts.errors > 0
+      ? `${counts.errors} error${counts.errors === 1 ? '' : 's'}`
+      : counts.warnings > 0
+        ? `${counts.warnings} warning${counts.warnings === 1 ? '' : 's'}`
+        : 'Valid'
+    const validityColor = counts.errors > 0 ? 'error' : counts.warnings > 0 ? 'warning' : 'success'
+
     return (
-      <Drawer anchor='right' open={open} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', sm: 'min(1100px, 92vw)' }, display: 'flex', flexDirection: 'column' } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <Box>
+      <Drawer
+        anchor='right'
+        open={open}
+        onClose={onClose}
+        PaperProps={{
+          sx: {
+            width: aiOpen ? { xs: '100%', md: 'min(1560px, 96vw)' } : { xs: '100%', sm: 'min(1100px, 92vw)' },
+            display: 'flex',
+            flexDirection: 'column',
+          },
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Box sx={{ minWidth: 0 }}>
             <Typography variant='h6'>Edit Script</Typography>
-            <Typography variant='body2' color='text.secondary'>{draft.instanceName}</Typography>
+            <Typography variant='body2' color='text.secondary' noWrap>{draft.instanceName}</Typography>
           </Box>
-          <Tooltip title='Close'>
-            <IconButton onClick={onClose} aria-label='close editor'><CloseIcon /></IconButton>
-          </Tooltip>
+          <Stack direction='row' spacing={1} alignItems='center'>
+            <Chip
+              size='small'
+              color={validityColor}
+              variant={counts.errors > 0 ? 'filled' : 'outlined'}
+              label={validityLabel}
+              clickable
+              onClick={() => setAiOpen(true)}
+            />
+            <Button
+              size='small'
+              variant={aiOpen ? 'contained' : 'outlined'}
+              startIcon={<AutoAwesomeIcon />}
+              onClick={() => setAiOpen(prev => !prev)}
+            >
+              AI Assist
+            </Button>
+            <Tooltip title='Close'>
+              <IconButton onClick={onClose} aria-label='close editor'><CloseIcon /></IconButton>
+            </Tooltip>
+          </Stack>
         </Box>
 
-        <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1 }}>
-          <FormControlLabel
-            control={<Checkbox size='small' checked={draft.isRestmon ?? false} onChange={e => setDraft(prev => {
-              const next = { ...prev, isRestmon: e.target.checked }
-              if (next.isRestmon) {
-                if (typeof next.args !== 'object') next.args = {}
-              } else {
-                if (typeof next.args === 'object') next.args = ''
-              }
-              return next
-            })} />}
-            label='Is Restmon Script'
-            sx={{ mb: 1 }}
-          />
+        <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto', px: 2, py: 1, display: { xs: aiOpen ? 'none' : 'block', md: 'block' } }}>
+            <FormControlLabel
+              control={<Checkbox size='small' checked={draft.isRestmon ?? false} onChange={e => setDraft(prev => {
+                const next = { ...prev, isRestmon: e.target.checked }
+                if (next.isRestmon) {
+                  if (typeof next.args !== 'object') next.args = {}
+                } else {
+                  if (typeof next.args === 'object') next.args = ''
+                }
+                return next
+              })} />}
+              label='Is Restmon Script'
+              sx={{ mb: 1 }}
+            />
 
-          <Accordion expanded={expandedSections.identity} onChange={toggleSection('identity')} disableGutters>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight={600}>Identity</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Grid container spacing={2}>
-                {sectionFields(['instanceName', 'scriptPath'])}
-              </Grid>
-            </AccordionDetails>
-          </Accordion>
-
-          <Accordion expanded={expandedSections.request} onChange={toggleSection('request')} disableGutters>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight={600}>{draft.isRestmon ? 'Request' : 'Arguments'}</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Grid container spacing={2}>
-                {sectionFields(SECTION_FIELDS.request)}
-              </Grid>
-            </AccordionDetails>
-          </Accordion>
-
-          {draft.isRestmon && (
-            <Accordion expanded={expandedSections.auth} onChange={toggleSection('auth')} disableGutters>
+            <Accordion expanded={expandedSections.identity} onChange={toggleSection('identity')} disableGutters>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography fontWeight={600}>Authentication</Typography>
+                <Typography fontWeight={600}>Identity</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Grid container spacing={2}>
-                  {sectionFields(SECTION_FIELDS.auth)}
+                  {sectionFields(['instanceName', 'scriptPath'])}
                 </Grid>
               </AccordionDetails>
             </Accordion>
-          )}
 
-          <Accordion expanded={expandedSections.monitoring} onChange={toggleSection('monitoring')} disableGutters>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight={600}>Monitoring</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Grid container spacing={2}>
-                {sectionFields(SECTION_FIELDS.monitoring)}
-              </Grid>
-            </AccordionDetails>
-          </Accordion>
+            <Accordion expanded={expandedSections.request} onChange={toggleSection('request')} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography fontWeight={600}>{draft.isRestmon ? 'Request' : 'Arguments'}</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  {sectionFields(SECTION_FIELDS.request)}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
 
-          {schedulingSection}
+            {draft.isRestmon && (
+              <Accordion expanded={expandedSections.auth} onChange={toggleSection('auth')} disableGutters>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography fontWeight={600}>Authentication</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={2}>
+                    {sectionFields(SECTION_FIELDS.auth)}
+                  </Grid>
+                </AccordionDetails>
+              </Accordion>
+            )}
 
-          <Accordion expanded={expandedSections.output} onChange={toggleSection('output')} disableGutters>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight={600}>Output Preview</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <TextField
-                label={draft.isRestmon ? 'Encoded Command Preview' : 'Arguments Preview'}
-                fullWidth multiline minRows={2} size='small'
-                value={encodedPreview}
-                InputProps={{ readOnly: true }}
-              />
-            </AccordionDetails>
-          </Accordion>
+            <Accordion expanded={expandedSections.monitoring} onChange={toggleSection('monitoring')} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography fontWeight={600}>Monitoring</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  {sectionFields(SECTION_FIELDS.monitoring)}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+
+            {schedulingSection}
+
+            <Accordion expanded={expandedSections.output} onChange={toggleSection('output')} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography fontWeight={600}>Output Preview</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <TextField
+                  label={draft.isRestmon ? 'Encoded Command Preview' : 'Arguments Preview'}
+                  fullWidth multiline minRows={2} size='small'
+                  value={encodedPreview}
+                  InputProps={{ readOnly: true }}
+                />
+              </AccordionDetails>
+            </Accordion>
+          </Box>
+
+          <ScriptAiAssistant
+            key={`${device.id}:${draft.id}`}
+            open={aiOpen}
+            instance={draft}
+            deviceName={device.name}
+            issues={validationIssues}
+            onApply={applyAiUpdates}
+            onUndo={undoAiChanges}
+            canUndo={Boolean(aiUndoState && JSON.stringify(draft) === aiUndoState.afterSignature)}
+            onClose={() => setAiOpen(false)}
+            onOpenSettings={() => onOpenSettings?.()}
+          />
         </Box>
 
         <Divider />
         <Box sx={{ display: 'flex', gap: 1, p: 2, backgroundColor: 'background.paper' }}>
           <Button variant='outlined' startIcon={<ScienceIcon />} onClick={runDryRun}>Run…</Button>
-          <Button variant='contained' startIcon={<SaveIcon />} onClick={save}>Save Script</Button>
+          <Button variant='contained' startIcon={<SaveIcon />} onClick={saveDraft}>Save Script</Button>
           <Button variant='text' startIcon={<CloseIcon />} onClick={onClose}>Cancel</Button>
         </Box>
 
